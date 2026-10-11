@@ -1564,7 +1564,7 @@
                    <number>1</number>
                   </property>
                   <property name="value">
-                   <number>1000</number>
+                   <number>700</number>
                   </property>
                   <property name="suffix">
                    <string> ms</string>
@@ -2382,7 +2382,7 @@
                    <item row="13" column="0" colspan="3">
                     <widget class="QLabel" name="zenzPreeditColorLabel">
                      <property name="text">
-                      <string>Zenz ライブ補正</string>
+                      <string>Zenz 補正中の文字</string>
                      </property>
                     </widget>
                    </item>

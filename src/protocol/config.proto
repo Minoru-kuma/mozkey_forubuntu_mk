@@ -346,7 +346,7 @@ message Config {
   // after normal live conversion has been computed. Normally the Mozc result is
   // already visible during this delay; deferred presentation can keep the
   // previous preedit visible instead.
-  optional uint32 zenz_live_correction_delay_msec = 1004 [default = 1000];
+  optional uint32 zenz_live_correction_delay_msec = 1004 [default = 700];
 
   // Keep the pre-Zenz preedit visible while Zenz live correction is pending.
   // Mozc conversion still runs first and remains the validation baseline and
