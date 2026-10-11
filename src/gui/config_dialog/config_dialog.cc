@@ -292,36 +292,45 @@ ConfigDialog::ConfigDialog()
           static_cast<int>(config::Config::WINDOWS_IME_ICON_DEFAULT)) {
   setupUi(this);
 
-  // QScrollArea has its own viewport, and the viewport may paint a different
-  // background from ordinary tab pages.  Do not paint it with a palette color
-  // and do not use stylesheets here, because stylesheets can interfere with
-  // native QCheckBox and QFrame line rendering.  Make only the scroll area
-  // surface transparent so the underlying tab page paints the background.
-  inputSupportScrollArea->setFrameShape(QFrame::NoFrame);
+  // Both scrollable tabs must preserve the native tab-page background and
+  // avoid stylesheets that can affect checkbox and separator rendering.
+  const auto prepare_scroll_area = [](QScrollArea* area, QWidget* contents) {
+    area->setFrameShape(QFrame::NoFrame);
+    area->setAutoFillBackground(false);
+    area->viewport()->setAutoFillBackground(false);
+    contents->setAutoFillBackground(false);
+    area->setAttribute(Qt::WA_StyledBackground, false);
+    area->viewport()->setAttribute(Qt::WA_StyledBackground, false);
+    contents->setAttribute(Qt::WA_StyledBackground, false);
+    area->viewport()->setAttribute(Qt::WA_TranslucentBackground, true);
+    contents->setAttribute(Qt::WA_TranslucentBackground, true);
+    area->viewport()->setAttribute(Qt::WA_NoSystemBackground, true);
+    contents->setAttribute(Qt::WA_NoSystemBackground, true);
+    area->setStyleSheet(QString());
+    area->viewport()->setStyleSheet(QString());
+    contents->setStyleSheet(QString());
+  };
+  prepare_scroll_area(inputSupportScrollArea,
+                      inputSupportScrollAreaWidgetContents);
+  prepare_scroll_area(inputAppearanceScrollArea,
+                      inputAppearanceScrollAreaWidgetContents);
 
-  inputSupportScrollArea->setAutoFillBackground(false);
-  inputSupportScrollArea->viewport()->setAutoFillBackground(false);
-  inputSupportScrollAreaWidgetContents->setAutoFillBackground(false);
+  // Move the existing TSF preedit widgets without recreating them. The
+  // existing signal connections, config fields, and translations are reused.
+  inputSupportContentLayout->removeWidget(preeditDisplayColorGroupBox);
+  preeditDisplayColorGroupBox->setParent(
+      inputAppearanceScrollAreaWidgetContents);
+  inputAppearanceContentLayout->insertWidget(0, preeditDisplayColorGroupBox);
+  preeditDisplayColorGroupBox->show();
 
-  inputSupportScrollArea->setAttribute(Qt::WA_StyledBackground, false);
-  inputSupportScrollArea->viewport()->setAttribute(Qt::WA_StyledBackground,
-                                                   false);
-  inputSupportScrollAreaWidgetContents->setAttribute(Qt::WA_StyledBackground,
-                                                     false);
-
-  inputSupportScrollArea->viewport()->setAttribute(
-      Qt::WA_TranslucentBackground, true);
-  inputSupportScrollAreaWidgetContents->setAttribute(
-      Qt::WA_TranslucentBackground, true);
-
-  inputSupportScrollArea->viewport()->setAttribute(Qt::WA_NoSystemBackground,
-                                                   true);
-  inputSupportScrollAreaWidgetContents->setAttribute(
-      Qt::WA_NoSystemBackground, true);
-
-  inputSupportScrollArea->setStyleSheet(QString());
-  inputSupportScrollArea->viewport()->setStyleSheet(QString());
-  inputSupportScrollAreaWidgetContents->setStyleSheet(QString());
+#if !defined(_WIN32) && !defined(__APPLE__)
+  // On Linux neither the detailed renderer appearance nor TSF preedit
+  // attributes are supported. Keep the tab out of the navigation entirely.
+  const int appearance_index = configDialogTabWidget->indexOf(inputAppearanceTab);
+  if (appearance_index >= 0) {
+    configDialogTabWidget->removeTab(appearance_index);
+  }
+#endif  // !defined(_WIN32) && !defined(__APPLE__)
 
   Qt::WindowFlags flags = windowFlags();
   flags &= ~Qt::WindowContextHelpButtonHint;
@@ -350,8 +359,10 @@ ConfigDialog::ConfigDialog()
 
 #if defined(__linux__)
   // The last "misc" tab has no valid configs on Linux
-  constexpr int kMiscTabIndex = 6;
-  configDialogTabWidget->removeTab(kMiscTabIndex);
+  const int misc_index = configDialogTabWidget->indexOf(miscTab);
+  if (misc_index >= 0) {
+    configDialogTabWidget->removeTab(misc_index);
+  }
 #endif  // __linux__
 #endif  // NDEBUG
 
@@ -683,24 +694,29 @@ ConfigDialog::ConfigDialog()
   IMEHotKeyDisabledCheckBox->setVisible(false);
 #endif  // _WIN32
 
-  // QScrollArea breaks the minimum-width chain from its scroll widget to the
-  // surrounding dialog.  Synchronize the Advanced tab's minimum width only
-  // after translated labels, config-backed table contents, and all
-  // platform-specific visibility have reached their final initial state.
-  // Keep an as-needed horizontal scrollbar as a safety valve for unusual font,
-  // translation, or accessibility configurations.
-  inputSupportContentLayout->invalidate();
-  inputSupportContentLayout->activate();
-  const int input_support_minimum_width =
-      inputSupportScrollAreaWidgetContents->minimumSizeHint().width();
-  if (input_support_minimum_width > 0) {
-    const int scrollbar_extent = inputSupportScrollArea->style()->pixelMetric(
-        QStyle::PM_ScrollBarExtent, nullptr, inputSupportScrollArea);
-    inputSupportScrollArea->setMinimumWidth(
-        input_support_minimum_width + scrollbar_extent +
-        2 * inputSupportScrollArea->frameWidth());
-  }
-
+  // QScrollArea does not automatically propagate child minimumSizeHint().
+  // Recalculate the two tab widths after translations and platform filtering.
+  const auto synchronize_minimum_width = [](QScrollArea* area,
+                                            QWidget* contents,
+                                            QVBoxLayout* layout) {
+    layout->invalidate();
+    layout->activate();
+    const int content_width = contents->minimumSizeHint().width();
+    if (content_width > 0) {
+      const int scrollbar_width =
+          area->style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, area);
+      area->setMinimumWidth(content_width + scrollbar_width +
+                            2 * area->frameWidth());
+    }
+  };
+  synchronize_minimum_width(inputSupportScrollArea,
+                            inputSupportScrollAreaWidgetContents,
+                            inputSupportContentLayout);
+#if defined(_WIN32) || defined(__APPLE__)
+  synchronize_minimum_width(inputAppearanceScrollArea,
+                            inputAppearanceScrollAreaWidgetContents,
+                            inputAppearanceContentLayout);
+#endif  // _WIN32 || __APPLE__
   RecordCurrentStateAsApplied();
   suppress_apply_button_update_ = false;
   EnableApplyButton();
@@ -2720,7 +2736,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
   // The checkbox and theme combo are defined in the .ui file for config
   // serialization compatibility, then reparented here.
   QWidget* mode_indicator_group =
-      new QWidget(inputSupportScrollAreaWidgetContents);
+      new QWidget(inputAppearanceScrollAreaWidgetContents);
   mode_indicator_group->setObjectName(
       QStringLiteral("modeIndicatorAppearanceGroupBox"));
   mode_indicator_group->setSizePolicy(QSizePolicy::Preferred,
@@ -3012,7 +3028,7 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                    SLOT(UpdateRendererAppearanceControls()));
 #endif  // _WIN32
 
-  QWidget* group = new QWidget(inputSupportScrollAreaWidgetContents);
+  QWidget* group = new QWidget(inputAppearanceScrollAreaWidgetContents);
   group->setObjectName(QStringLiteral("rendererAppearanceGroupBox"));
   group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
@@ -3474,19 +3490,19 @@ void ConfigDialog::InitializeRendererAppearanceControls() {
                               QStringLiteral("suggestWindow"), true);
   add_ruby_palette_group();
 
-  // Put the frequently used candidate/suggestion/ruby appearance first.
+  // Place candidate/suggestion/ruby first on the Appearance tab.
   // On Windows, keep the input-mode indicator next and the TSF preedit color
   // customization after both sections.
   const int preedit_index =
-      inputSupportContentLayout->indexOf(preeditDisplayColorGroupBox);
+      inputAppearanceContentLayout->indexOf(preeditDisplayColorGroupBox);
   const int renderer_insert_index =
-      preedit_index >= 0 ? preedit_index : inputSupportContentLayout->count();
-  inputSupportContentLayout->insertWidget(renderer_insert_index, group);
+      preedit_index >= 0 ? preedit_index : inputAppearanceContentLayout->count();
+  inputAppearanceContentLayout->insertWidget(renderer_insert_index, group);
 
 #ifdef _WIN32
   const int mode_indicator_insert_index =
-      inputSupportContentLayout->indexOf(group) + 1;
-  inputSupportContentLayout->insertWidget(mode_indicator_insert_index,
+      inputAppearanceContentLayout->indexOf(group) + 1;
+  inputAppearanceContentLayout->insertWidget(mode_indicator_insert_index,
                                           mode_indicator_group);
 #endif  // _WIN32
 }
