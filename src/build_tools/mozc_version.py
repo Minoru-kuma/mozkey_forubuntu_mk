@@ -330,6 +330,23 @@ class MozcVersion(object):
     """
     return self._properties.get('TARGET_PLATFORM', None)
 
+  def GetMozkeyReleaseVersionString(self):
+    """Returns the public Mozkey release version, e.g. 0.7.7."""
+    return self.GetVersionInFormat(
+        '@MOZKEY_RELEASE_VERSION_MAJOR@.@MOZKEY_RELEASE_VERSION_MINOR@.'
+        '@MOZKEY_RELEASE_VERSION_PATCH@'
+    )
+
+  def GetMozkeyInstallerVersion(self):
+    """Returns the monotonically increasing 3-part installer version."""
+    major, minor, patch = map(
+        int, self.GetMozkeyReleaseVersionString().split('.')
+    )
+    if major < 0 or not (0 <= minor <= 99 and 0 <= patch <= 99):
+      raise ValueError('Unsupported Mozkey release version components')
+    # Corresponds to the 100+major mapping in src/version.bzl.
+    return f'{100 + major}.{minor}.{patch}'
+
   def GetVersionString(self):
     """Returns the normal version info string.
 
