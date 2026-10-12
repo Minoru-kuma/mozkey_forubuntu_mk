@@ -3,6 +3,7 @@ load(
     "mozc_cc_binary",
     "mozc_cc_library",
     "mozc_cc_test",
+    "mozc_win32_resource_from_template",
 )
 
 package(default_visibility = ["//visibility:private"])
@@ -166,8 +167,14 @@ mozc_cc_binary(
             ":posix_runtime",
             "//zenz:unix_socket_path",
         ],
+        "@platforms//os:windows": [":mozc_zenz_scorer_resources"],
         "//conditions:default": [],
     }),
+)
+
+mozc_win32_resource_from_template(
+    name = "mozc_zenz_scorer_resources",
+    src = "mozc_zenz_scorer.rc",
 )
 
 # Package-level release verification helper. Keep it in //zenz_scorer so it
