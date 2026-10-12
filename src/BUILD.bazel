@@ -263,28 +263,23 @@ exports_files(
 apple_bundle_version(
     name = "version_macos",
     build_label_pattern = (
-        "{major}.{minor}.{patch}"
-        if BRANDING == "Mozc" else "{version}.{revision}"
+        "{major}.{minor}.{patch}" if BRANDING == "Mozc" else "{version}.{revision}"
     ),
     build_version = (
-        "{major}.{minor}.{patch}"
-        if BRANDING == "Mozc" else "{version}.{revision}"
+        "{major}.{minor}.{patch}" if BRANDING == "Mozc" else "{version}.{revision}"
     ),
     capture_groups = (
         {
             "major": "\\d+",
             "minor": "\\d+",
             "patch": "\\d+",
-        }
-        if BRANDING == "Mozc"
-        else {
+        } if BRANDING == "Mozc" else {
             "version": "\\d+\\.\\d+\\.\\d+",
             "revision": "\\d+",
         }
     ),
     fallback_build_label = (
-        MOZKEY_MACOS_INSTALL_VERSION
-        if BRANDING == "Mozc" else DEFAULT_BUILD_LABEL_MACOS
+        MOZKEY_MACOS_INSTALL_VERSION if BRANDING == "Mozc" else DEFAULT_BUILD_LABEL_MACOS
     ),
     short_version_string = (
         MOZKEY_RELEASE_VERSION if BRANDING == "Mozc" else "{version}"
