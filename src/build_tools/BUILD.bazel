@@ -86,8 +86,8 @@ mozc_py_binary(
 
 py_test(
     name = "mozc_version_mozkey_test",
-    srcs = ["mozc_version_mozkey_test.py"],
     size = "small",
+    srcs = ["mozc_version_mozkey_test.py"],
     deps = [":mozc_version_lib"],
 )
 
