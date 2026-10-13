@@ -49,6 +49,7 @@
 #include "absl/types/span.h"
 #include "base/strings/assign.h"
 #include "base/strings/unicode.h"
+#include "base/system_util.h"
 #include "base/vlog.h"
 #include "composer/composer.h"
 #include "composer/key_parser.h"
@@ -268,9 +269,23 @@ class ScopedUserProfileForZenzFeedbackSessionTest {
 
 class ScopedUserProfileForZenzFeedbackSessionTest {
  public:
-  // SessionTest derives from TestWithTempUserProfile, which already redirects
-  // SystemUtil::GetUserProfileDirectory() to a unique temporary directory.
+  // The outer SessionTest profile is isolated per TEST_F, not per loop
+  // iteration. Each learning-switch combination needs a fresh feedback store.
+  ScopedUserProfileForZenzFeedbackSessionTest()
+      : previous_profile_(SystemUtil::GetUserProfileDirectory()),
+        profile_dir_(testing::MakeTempDirectoryOrDie()) {
+    SystemUtil::SetUserProfileDirectory(profile_dir_.path());
+  }
+
+  ~ScopedUserProfileForZenzFeedbackSessionTest() {
+    SystemUtil::SetUserProfileDirectory(previous_profile_);
+  }
+
   bool ok() const { return true; }
+
+ private:
+  const std::string previous_profile_;
+  TempDirectory profile_dir_;
 };
 
 #endif  // defined(_WIN32) || defined(__APPLE__)
