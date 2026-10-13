@@ -57,6 +57,19 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 > 個人用 fork の experimental / pre-release build です。
 > MSI は署名されていないため、Windows の警告が表示される場合があります。
 
+### macOSでの初期設定（開発用PKG）
+
+現在、macOS用のビルド済みPKGはReleasesで公開していません。以下は、検証済みのインストール可能な開発用PKGを導入した場合の手順です。通常のOSSビルドで生成されるguarded PKGはインストールできません。ビルド条件については[macOS Zenz対応Universal PKGのビルド](#macos-zenz-対応-universal-pkg-のビルド)を参照してください。
+
+1. インストール後、macOSからログアウトし、再ログインします。
+2. 「システム設定」→「キーボード」→「テキスト入力」の「編集」を開きます。
+3. 入力ソースに「Hiragana (Mozkey)」（表示言語によっては「ひらがな（Mozkey）」）が登録されていれば追加は不要です。登録されていない場合は「+」→「日本語」からMozkeyのひらがな入力ソースを探して追加します。
+4. メニューバーの入力メニューからMozkeyのひらがな入力ソースを選択します。
+
+macOS 0.7.7の実機検証では、インストール直後に入力メニューへ表示されなくても、ログアウト・再ログイン後に「Hiragana (Mozkey)」が利用可能になりました。入力ソースの反映に時間がかかる原因は未確定であり、すべての環境で同じ手順・結果になると保証するものではありません。
+
+macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27)も参照してください。
+
 <br>
 
 主な追加機能
@@ -797,6 +810,10 @@ bazelisk build \
 `--define=macos_zenz_runtime=1` を付けない generic package build は、
 Zenz runtime を含む配布用 macOS PKG としては扱いません。
 
+**インストール可否は Zenz 同梱の有無とは別の制御です。** 上記コマンドは、誤インストールを防ぐため、ビルドは可能でもインストール禁止の guarded PKG を生成します。実機インストール用のPKGを明示的に生成する場合に限り、監査後、上記 `bazelisk build` に `--define=MOZKEY_INSTALLABLE=1` を追加してください。この指定は `--config=oss_macos` と併用し、生成PKGから実際の preinstall と receipt バージョンを確認する必要があります。判定条件と27ケースの回帰テストは [macOSインストーラー検証手順](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md) を参照してください。
+
+macOS 0.7.7（内部インストールバージョン `100.7.7`）の実機検証では、正規アンインストール後にreceiptだけが残った状態から、`pkgutil --forget` なしで再インストールできました。ただし、GUIインストール直後に「Hiragana (Mozkey)」が入力ソースへ表示されない場合、ログアウト・再ログインで反映されることを確認しています。検証に使用した開発用PKGはパッケージレベルでは未署名・未公証であり、一般向けのmacOS配布物としてはまだ公開していません。
+
 正式な architecture/runtime gate では、最終 `.pkg` を Apple Silicon で検証し、
 同一 SHA-256 の package artifact を native Intel runner に渡して、
 同じ package-level verifier で `mozc_zenz_scorer -> llama-server -> model`
@@ -823,6 +840,18 @@ This repository is my personal fork of [google/mozc](https://github.com/google/m
 This fork is mainly maintained for my own Windows / macOS environments and adds input assistance, live conversion, context-aware conversion, local Zenz correction, system-theme-aware renderer appearance, and offline-distribution-oriented adjustments to Mozc.
 
 This build is not an official google/mozc distribution.
+
+macOS initial setup (development PKGs)
+--------------------------------------
+
+Prebuilt macOS PKGs are not currently published in Releases. The following steps apply after installing an audited, explicitly installable development PKG; ordinary guarded OSS PKGs intentionally refuse installation. See [Building a Zenz-enabled Universal macOS PKG](#building-a-zenz-enabled-universal-macos-pkg) for build and installation-gate details.
+
+1. Log out of macOS and log back in after installation.
+2. Open **System Settings → Keyboard → Text Input → Edit**.
+3. If **Hiragana (Mozkey)** is already in the input-source list, do not add it again. Otherwise, click **+**, select **Japanese**, and look for the Mozkey Hiragana input source to add. The name may be localized.
+4. Select the Mozkey Hiragana input source from the menu-bar input menu.
+
+On the tested macOS 0.7.7 installation, Hiragana (Mozkey) became selectable after logging out and back in, despite not appearing immediately after the GUI install. The cause of the delay is not yet established, and behavior may vary between systems. See the [Apple input-source settings guide](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/27/mac/27) for the settings path.
 
 Privacy / Network Access
 ------------------------
@@ -1930,6 +1959,10 @@ bazelisk build \
 
 A generic package built without `--define=macos_zenz_runtime=1` should not be
 treated as a distributable Zenz-enabled macOS PKG.
+
+**Zenz bundling and installability are separate controls.** The command above generates a guarded package whose installation is intentionally blocked. Only when deliberately preparing an audited, installable package, add `--define=MOZKEY_INSTALLABLE=1` to that Bazel command together with `--config=oss_macos`. Inspect the packaged preinstall script and receipt version before installation. See the [macOS installer test guide](src/mac/MOZKEY_MACOS_INSTALL_TESTING.md) for the safety contract and 27 regression cases.
+
+On a physical Mac, Mozkey 0.7.7 (internal installer version `100.7.7`) was reinstalled over a verified orphan receipt without `pkgutil --forget`. The input-source menu required logout/login before `Hiragana (Mozkey)` became available after GUI installation. The tested development PKGs were unsigned at the package level and not notarized; a public macOS installer is not yet provided in Releases.
 
 The formal architecture/runtime gate verifies the final `.pkg` on Apple
 Silicon, transfers that exact SHA-256-identical package artifact to a native
