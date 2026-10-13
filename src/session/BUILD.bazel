@@ -406,6 +406,7 @@ mozc_cc_test(
         ":ime_context",
         ":keymap",
         ":session",
+        "//base:system_util",
         "//base:vlog",
         "//base/strings:assign",
         "//base/strings:unicode",
