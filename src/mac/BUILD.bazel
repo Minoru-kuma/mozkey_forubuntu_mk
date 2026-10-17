@@ -497,8 +497,15 @@ genrule(
     ],
 )
 
-# Keep the shared Mozc postflight logic unmodified. Append the cleanup tail
-# only for OSS Mozkey; it handles one known unsealed legacy Renderer resource.
+# Keep shared upstream Mozc postflight unchanged. Only the OSS generation
+# path removes the one known unsafe generic llama-server killall, fail-closed.
+# Default/proprietary builds retain their original unmodified postflight.
+mozc_py_binary(
+    name = "filter_postflight_mozkey_oss",
+    srcs = ["postflight_mozkey_oss_filter.py"],
+    test_lib = False,
+)
+
 genrule(
     name = "tweak_postflight",
     srcs = [":tweak_postflight_common"] + mozc_select(
@@ -506,11 +513,18 @@ genrule(
         oss = ["postflight_mozkey_oss_cleanup.sh"],
     ),
     outs = ["postflight.sh"],
-    cmd = "/bin/cat $(location :tweak_postflight_common) > $@" + mozc_select(
-        default = "",
-        oss = " && /bin/cat $(location postflight_mozkey_oss_cleanup.sh) >> $@",
+    cmd = mozc_select(
+        default = "/bin/cat $(location :tweak_postflight_common) > $@",
+        oss = "$(location :filter_postflight_mozkey_oss)" +
+              " --input $(location :tweak_postflight_common)" +
+              " --tail $(location postflight_mozkey_oss_cleanup.sh)" +
+              " --output $@",
     ),
     tags = MOZC_TAGS.MAC_ONLY,
+    tools = mozc_select(
+        default = [],
+        oss = [":filter_postflight_mozkey_oss"],
+    ),
 )
 
 mozc_py_binary(
