@@ -520,11 +520,11 @@ genrule(
               " --tail $(location postflight_mozkey_oss_cleanup.sh)" +
               " --output $@",
     ),
+    tags = MOZC_TAGS.MAC_ONLY,
     tools = mozc_select(
         default = [],
         oss = [":filter_postflight_mozkey_oss"],
     ),
-    tags = MOZC_TAGS.MAC_ONLY,
 )
 
 mozc_py_binary(
