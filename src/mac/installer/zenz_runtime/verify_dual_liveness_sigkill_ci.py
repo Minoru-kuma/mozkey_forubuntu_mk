@@ -7,11 +7,13 @@ PIDs spawned by this test.  The formal PKG is expanded, never installed.
 """
 
 import argparse
+import ctypes
 import hashlib
 import http.client
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import socket
@@ -24,6 +26,36 @@ import time
 MODEL_SHA = "29c223d4c23327b80fd13ebb5ab2555057a46317997d5da391584ffbef0db673"
 MODEL_NAME = "zenz-v3.2-small-Q5_K_M.gguf"
 MAX_READY = 240
+
+# macOS process identity must be verified using the kernel's executable path,
+# not ps(1)'s argv display, which may vary in spelling or representation.
+# Do not weaken the ownership requirement: both inode identity and lstart must
+# match before any signal is sent to a PID discovered via process ancestry.
+if sys.platform == "darwin":
+    _libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    _proc_pidpath = _libproc.proc_pidpath
+    _proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    _proc_pidpath.restype = ctypes.c_int
+else:
+    _proc_pidpath = None
+
+
+def executable_path(pid):
+    if _proc_pidpath is None:
+        return ""
+    buf = ctypes.create_string_buffer(4096)
+    n = _proc_pidpath(pid, ctypes.cast(buf, ctypes.c_void_p), len(buf))
+    return os.fsdecode(buf.value) if n > 0 else ""
+
+
+def matches_executable(pid, expected):
+    actual = executable_path(pid)
+    if not actual:
+        return False
+    try:
+        return os.path.samefile(actual, expected)
+    except OSError:
+        return False
 
 
 def need(condition, reason):
@@ -55,12 +87,15 @@ def ps_value(pid, field):
 
 
 def snapshot(pid, executable):
-    command = ps_value(pid, "command")
     expected = str(executable)
-    need(command == expected or command.startswith(expected + " "),
-         "UNEXPECTED_PROCESS_EXECUTABLE pid=" + str(pid))
+    actual = executable_path(pid)
+    need(bool(actual), "PROCESS_EXECUTABLE_UNAVAILABLE pid=" + str(pid))
+    need(matches_executable(pid, expected),
+         "UNEXPECTED_PROCESS_EXECUTABLE pid=" + str(pid) +
+         " actual=" + actual + " expected=" + expected)
     start = ps_value(pid, "lstart")
     need(bool(start), "PROCESS_START_TIME_MISSING")
+    need(ps_value(pid, "state").upper()[:1] != "Z", "PROCESS_ZOMBIE")
     return {"pid": pid, "start": start, "exe": expected}
 
 
@@ -70,8 +105,7 @@ def alive(ref):
     pid = ref["pid"]
     if ps_value(pid, "lstart") != ref["start"]:
         return False
-    command = ps_value(pid, "command")
-    if command != ref["exe"] and not command.startswith(ref["exe"] + " "):
+    if not matches_executable(pid, ref["exe"]):
         return False
     state = ps_value(pid, "state")
     return bool(state) and not state.upper().startswith("Z")
@@ -97,22 +131,30 @@ def children(ppid):
     return result
 
 
-def wait_child(ppid, exe, seconds=15):
+def wait_child(ppid, exe, seconds=15, parent_proc=None):
     deadline = time.monotonic() + seconds
+    mismatches = []
     while time.monotonic() < deadline:
+        if parent_proc is not None:
+            need(parent_proc.poll() is None,
+                 "SCORER_EXITED_WHILE_FINDING_CHILD rc=" + str(parent_proc.returncode))
         found = []
         for pid in children(ppid):
             try:
                 ref = snapshot(pid, exe)
                 if alive(ref) and ps_value(pid, "ppid") == str(ppid):
                     found.append(ref)
-            except RuntimeError:
-                pass
+            except RuntimeError as exc:
+                if len(mismatches) < 6:
+                    mismatches.append(str(exc))
         need(len(found) <= 1, "MULTIPLE_EXPECTED_CHILDREN")
         if found:
             return found[0]
         time.sleep(0.2)
-    raise RuntimeError("EXPECTED_CHILD_NOT_FOUND " + exe.name)
+    raise RuntimeError("EXPECTED_CHILD_NOT_FOUND " + exe.name +
+                       " parent=" + str(ppid) +
+                       " observed_child_count=" + str(len(children(ppid))) +
+                       " mismatches=" + repr(mismatches))
 
 
 def ensure_absent_namespace():
@@ -212,6 +254,43 @@ def checked_runtime_copy(runtime, parent):
     return folder
 
 
+def scrub_diagnostics(text):
+    # CI logs are public. Never print token-bearing argv or raw token strings.
+    text = re.sub(r"(?i)(--api-key(?:=|\s+))\S+", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)(bearer\s+)\S+", r"\1[REDACTED]", text)
+    text = re.sub(r"\b[0-9a-fA-F]{32,}\b", "[HEX_REDACTED]", text)
+    return text
+
+
+def failure_diagnostics(scorer, scorer_ref, guard_ref, worker_ref, root):
+    info = {"scorer_exit_code": scorer.poll() if scorer else None}
+    if scorer_ref:
+        pid = scorer_ref["pid"]
+        info["scorer_process"] = {
+            "pid": pid, "alive": alive(scorer_ref),
+            "kernel_executable": executable_path(pid),
+            "start_time": ps_value(pid, "lstart"),
+            "state": ps_value(pid, "state")}
+        info["scorer_children"] = [
+            {"pid": child, "kernel_executable": executable_path(child),
+             "start_time": ps_value(child, "lstart"),
+             "state": ps_value(child, "state")}
+            for child in children(pid)][:12]
+    for label, ref in (("guard", guard_ref), ("worker", worker_ref)):
+        if ref:
+            info[label] = {"pid": ref["pid"], "alive": alive(ref),
+                           "kernel_executable": executable_path(ref["pid"]),
+                           "ppid": ps_value(ref["pid"], "ppid")}
+    log = root / "scorer.log"
+    if log.is_file():
+        chunk = log.read_bytes()[-16384:].decode("utf-8", "replace")
+        lines = [line for line in chunk.splitlines()
+                 if any(key in line.lower() for key in
+                        ("error", "fail", "exit", "guard", "worker", "start", "kill"))]
+        info["scorer_log_filtered"] = scrub_diagnostics("\n".join(lines[-45:]))[-7000:]
+    return info
+
+
 def test(pkg, expected_sha, root):
     namespace = ensure_absent_namespace()
     need(os.geteuid() != 0, "DO_NOT_RUN_AS_ROOT")
@@ -219,7 +298,7 @@ def test(pkg, expected_sha, root):
               "pkg_sha256": expected_sha, "architecture": os.uname().machine,
               "checks": {}, "namespace": str(namespace)}
     scorer = foreign = None
-    guard_ref = worker_ref = foreign_ref = None
+    scorer_ref = guard_ref = worker_ref = foreign_ref = None
     failures = []
     try:
         runtime = verify_package(pkg, expected_sha, root)
@@ -249,8 +328,8 @@ def test(pkg, expected_sha, root):
                                       cwd=testing, start_new_session=True)
         scorer_ref = snapshot(scorer.pid, scorer_path)
         wait_socket(scorer, namespace / "scorer.sock")
-        guard_ref = wait_child(scorer.pid, guard)
-        worker_ref = wait_child(guard_ref["pid"], worker)
+        guard_ref = wait_child(scorer.pid, guard, parent_proc=scorer)
+        worker_ref = wait_child(guard_ref["pid"], worker, parent_proc=scorer)
         need(alive(guard_ref) and alive(worker_ref), "OWNED_CHAIN_NOT_READY")
         print("SCORER_GUARD_WORKER_CHAIN=PASS scorer_pid={} guard_pid={} worker_pid={}".format(
             scorer.pid, guard_ref["pid"], worker_ref["pid"]), flush=True)
@@ -277,6 +356,12 @@ def test(pkg, expected_sha, root):
         result["passed"] = True
     except BaseException as exc:
         failures.append(type(exc).__name__ + ":" + str(exc))
+        try:
+            diag = failure_diagnostics(scorer, scorer_ref, guard_ref, worker_ref, root)
+            result["diagnostics"] = diag
+            print("STAGE4_DIAGNOSTICS=" + json.dumps(diag, ensure_ascii=False), flush=True)
+        except BaseException as dexc:
+            failures.append("diagnostics_failed:" + type(dexc).__name__ + ":" + str(dexc))
     finally:
         if scorer is not None and scorer.poll() is None:
             scorer.terminate()
