@@ -2939,11 +2939,26 @@ bool Session::SendKeyPrecompositionState(commands::Command* command) {
   return ExecuteCommandSequence(command_sequence, command);
 }
 
+namespace {
+bool IsPassiveLiveSuggestionCandidateWindow(
+    const commands::CandidateWindow& candidate_window);
+bool HaveSamePassiveSuggestionCandidates(
+    const commands::CandidateWindow& lhs,
+    const commands::CandidateWindow& rhs);
+}  // namespace
+
 bool Session::SendKeyCompositionState(commands::Command* command) {
   keymap::CommandSequence command_sequence;
   const keymap::KeyMapManager* keymap = &context_->GetKeyMapManager();
+  // During delayed live conversion, the real converter may still have an
+  // obsolete SUGGESTION state.  Select the keymap from the visible window.
+  const bool has_visible_suggestion =
+      live_conversion_pending_
+          ? IsPassiveLiveSuggestionCandidateWindow(
+                pending_live_conversion_suggestion_candidate_window_)
+          : context_->converter().CheckState(EngineConverterInterface::SUGGESTION);
   const bool result =
-      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)
+      has_visible_suggestion
           ? keymap->GetCommandSequenceSuggestion(command->input().key(),
                                                  &command_sequence)
           : keymap->GetCommandSequenceComposition(command->input().key(),
@@ -3672,6 +3687,62 @@ bool Session::SelectCandidateInternal(commands::Command* command) {
     LOG(WARNING) << "input.command or input.command.id did not exist.";
     return false;
   }
+  // Passive live suggestions belong to a cloned ImeContext, not the real
+  // converter.  Candidate IDs are local to their owning candidate list.  Never
+  // resolve a displayed suggestion ID against the hidden real converter.
+  if (live_conversion_pending_ || live_conversion_active_) {
+    const bool pending = live_conversion_pending_;
+    const commands::CandidateWindow& window =
+        pending ? pending_live_conversion_suggestion_candidate_window_
+                : live_conversion_suggestion_candidate_window_;
+    const ImeContext* suggestion_context =
+        pending ? pending_live_conversion_suggestion_context_.get()
+                : live_conversion_suggestion_context_.get();
+
+    if (!IsPassiveLiveSuggestionCandidateWindow(window) ||
+        suggestion_context == nullptr ||
+        suggestion_context->composer().GetQueryForConversion() !=
+            context_->composer().GetQueryForConversion()) {
+      return false;
+    }
+
+    commands::Output snapshot_output;
+    suggestion_context->converter().FillOutput(
+        suggestion_context->composer(), &snapshot_output);
+    if (!snapshot_output.has_candidate_window() ||
+        !HaveSamePassiveSuggestionCandidates(
+            window, snapshot_output.candidate_window())) {
+      return false;
+    }
+
+    bool id_is_visible = false;
+    for (const auto& candidate : window.candidate()) {
+      if (candidate.has_id() &&
+          candidate.id() == command->input().command().id()) {
+        id_is_visible = true;
+        break;
+      }
+    }
+    if (!id_is_visible) {
+      return false;
+    }
+
+    auto focused_context = std::make_unique<ImeContext>(*suggestion_context);
+    if (!focused_context->mutable_converter()
+             ->FocusSuggestionCandidateWithoutPrediction(
+                 command->input().command().id())) {
+      return false;
+    }
+    if (HasVisibleZenzLiveCorrection()) {
+      SetPendingZenzFeedbackRejected("candidate_selection_after_zenz");
+    }
+    ClearLiveConversionState();
+    context_ = std::move(focused_context);
+    command->mutable_output()->set_consumed(true);
+    SetSessionState(ImeContext::CONVERSION, context_.get());
+    return true;
+  }
+
   if (!context_->converter().IsActive()) {
     LOG(WARNING) << "converter is not active. (no candidates)";
     return false;
@@ -3745,6 +3816,13 @@ bool Session::CommitCandidate(commands::Command* command) {
         break;
       }
     }
+  }
+
+  // Even if an integer ID exists in the hidden converter, it must not be
+  // treated as a match for an absent/stale passive live suggestion.
+  if ((live_conversion_active_ || live_conversion_pending_) &&
+      passive_suggestion == nullptr) {
+    return DoNothing(command);
   }
 
   bool submit_passive_live_suggestion = false;
@@ -8821,6 +8899,35 @@ bool Session::CommitFirstSuggestion(commands::Command* command) {
         context_->state() == ImeContext::PRECOMPOSITION)) {
     return DoNothing(command);
   }
+
+  // A delayed live conversion displays suggestions from a cloned context,
+  // while the real converter may still own suggestions for an older reading.
+  // Commit the exact displayed first suggestion, or fail closed.
+  if (live_conversion_pending_) {
+    const commands::CandidateWindow& window =
+        pending_live_conversion_suggestion_candidate_window_;
+    const ImeContext* suggestion_context =
+        pending_live_conversion_suggestion_context_.get();
+    if (!IsPassiveLiveSuggestionCandidateWindow(window) ||
+        suggestion_context == nullptr ||
+        suggestion_context->composer().GetQueryForConversion() !=
+            context_->composer().GetQueryForConversion()) {
+      return DoNothing(command);
+    }
+    commands::Output snapshot_output;
+    suggestion_context->converter().FillOutput(
+        suggestion_context->composer(), &snapshot_output);
+    if (!snapshot_output.has_candidate_window() ||
+        !HaveSamePassiveSuggestionCandidates(
+            window, snapshot_output.candidate_window())) {
+      return DoNothing(command);
+    }
+
+    auto displayed_context = std::make_unique<ImeContext>(*suggestion_context);
+    ClearLiveConversionState();
+    context_ = std::move(displayed_context);
+  }
+
   if (!context_->converter().IsActive()) {
     return DoNothing(command);
   }
@@ -9103,6 +9210,13 @@ bool Session::CaptureVisiblePassiveSuggestionSnapshot(
     return true;
   }
 
+  // While live conversion is active or pending, only a live suggestion
+  // snapshot can be visible.  The real converter may still retain a suggestion
+  // for an earlier reading, which must NEVER be resurrected as a HOLD result.
+  if (live_conversion_active_ || live_conversion_pending_) {
+    return false;
+  }
+
   commands::Output current_output;
   context_->converter().FillOutput(context_->composer(), &current_output);
   if (!current_output.has_candidate_window() ||
@@ -9161,7 +9275,7 @@ bool Session::AttachPassiveSuggestionSnapshot(
   return true;
 }
 
-bool Session::FocusHeldPassiveSuggestion(commands::Command* command) {
+bool Session::FocusDisplayedPassiveSuggestion(commands::Command* command) {
   DCHECK(command);
 
   // Ordinary (non-live) HOLD keeps the real converter in SUGGESTION state.
@@ -9197,15 +9311,15 @@ bool Session::FocusHeldPassiveSuggestion(commands::Command* command) {
   const commands::CandidateWindow* candidate_window = nullptr;
   const ImeContext* suggestion_context = nullptr;
 
+  // A newly generated live suggestion is just as authoritative as a held one.
+  // Both must focus the same candidate list that was actually displayed.
   if (live_conversion_active_ &&
-      live_conversion_holds_passive_suggestion_ &&
       IsPassiveLiveSuggestionCandidateWindow(
           live_conversion_suggestion_candidate_window_)) {
     candidate_window = &live_conversion_suggestion_candidate_window_;
     suggestion_context = live_conversion_suggestion_context_.get();
   } else if (
       live_conversion_pending_ &&
-      pending_live_conversion_holds_passive_suggestion_ &&
       IsPassiveLiveSuggestionCandidateWindow(
           pending_live_conversion_suggestion_candidate_window_)) {
     candidate_window =
@@ -10134,7 +10248,7 @@ bool Session::ConvertCancel(commands::Command* command) {
 bool Session::PredictAndConvertFromLiveConversion(commands::Command* command) {
   DCHECK(command);
 
-  if (FocusHeldPassiveSuggestion(command)) {
+  if (FocusDisplayedPassiveSuggestion(command)) {
     return true;
   }
 
@@ -10174,11 +10288,20 @@ bool Session::PredictAndConvertFromLiveConversion(commands::Command* command) {
 }
 
 bool Session::PredictAndConvert(commands::Command* command) {
-  if (FocusHeldPassiveSuggestion(command)) {
+  if (FocusDisplayedPassiveSuggestion(command)) {
     return true;
   }
 
+  const bool was_pending_live_conversion = live_conversion_pending_;
   CancelPendingLiveConversion();
+
+  // Do not seed a fresh prediction with stale real-converter suggestions that
+  // belonged to an earlier reading and were not displayed during pending live
+  // conversion.  Only the validated visible snapshot may be promoted above.
+  if (was_pending_live_conversion &&
+      context_->converter().CheckState(EngineConverterInterface::SUGGESTION)) {
+    context_->mutable_converter()->Cancel();
+  }
 
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertNext(command);
