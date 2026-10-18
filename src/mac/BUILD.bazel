@@ -109,6 +109,7 @@ mozc_macos_application(
             "//mac/installer/zenz_runtime:zenz_model_notice": "Resources/ZenzRuntime",
             "//renderer:mozc_renderer_macos": "Resources",
             "//server:mozc_server_macos": "Resources",
+            "//mac/installer/zenz_runtime:mozc_zenz_guard_runtime": "Resources/ZenzRuntime",
             "//mac/installer/zenz_runtime:mozc_zenz_scorer_runtime": "Resources/ZenzRuntime",
         },
     ),
