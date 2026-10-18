@@ -747,7 +747,8 @@ class Session {
       const mozc::commands::Input& input,
       PassiveSuggestionSnapshot* snapshot,
       mozc::commands::Output* output);
-  bool FocusHeldPassiveSuggestion(mozc::commands::Command* command);
+  // Focus the actual displayed passive-suggestion list, held or freshly made.
+  bool FocusDisplayedPassiveSuggestion(mozc::commands::Command* command);
   bool AttachLiveConversionSuggestionCandidateWindow(
       const mozc::commands::Input& input,
       mozc::commands::Output* output);

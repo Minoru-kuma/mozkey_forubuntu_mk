@@ -5556,6 +5556,241 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest,
+       DelayedLiveConversionDoesNotResurrectHiddenSuggestionOnPendingRoman) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter =
+      CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  session.SetConfig(config);
+
+  Segments old_suggestion;
+  Segment* old_segment = old_suggestion.add_segment();
+  old_segment->set_key("あ");
+  AddCandidate("あ", "old hidden suggestion", old_segment);
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(old_suggestion), Return(true)))
+      .WillOnce(Return(false));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "old hidden suggestion");
+
+  // The pending output has no visible suggestion.  The *real* converter still
+  // has the obsolete suggestion from "a", however.
+  command.Clear();
+  ASSERT_TRUE(SendKey("i", &session, &command));
+  ASSERT_TRUE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().has_candidate_window());
+  EXPECT_EQ(session.context().composer().GetQueryForConversion(), "あい");
+
+  // Unresolved trailing "k" requests HOLD.  It must not revive the old
+  // candidate after the preceding output explicitly hid all suggestions.
+  command.Clear();
+  ASSERT_TRUE(SendKey("k", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 1);
+  EXPECT_TRUE(command.output().live_conversion_pending());
+  EXPECT_FALSE(command.output().has_candidate_window());
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
+       DelayedLiveConversionDownSelectsFreshDisplayedSuggestion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter =
+      CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  Segments old_suggestion;
+  Segment* old_segment = old_suggestion.add_segment();
+  old_segment->set_key("あ");
+  AddCandidate("あ", "old hidden suggestion", old_segment);
+
+  Segments new_suggestion;
+  Segment* new_segment = new_suggestion.add_segment();
+  new_segment->set_key("あい");
+  AddCandidate("あい", "visible first", new_segment);
+  AddCandidate("あい", "visible second", new_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(old_suggestion), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(new_suggestion), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  command.Clear();
+  ASSERT_TRUE(SendKey("i", &session, &command));
+  ASSERT_TRUE(command.output().live_conversion_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "visible first");
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "visible second");
+
+  Mock::VerifyAndClearExpectations(converter.get());
+  // Selecting the displayed suggestion must not regenerate prediction from
+  // the real converter's old "a" candidate list.
+  EXPECT_CALL(*converter, StartPrediction(_, _)).Times(0);
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .Times(0);
+  EXPECT_CALL(*converter, PrependCandidates(_, _, _)).Times(0);
+  EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+      .Times(AtLeast(1))
+      .WillRepeatedly(Return(true));
+
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::DOWN, &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().category(),
+            commands::PREDICTION);
+  ASSERT_TRUE(command.output().candidate_window().has_focused_index());
+  EXPECT_EQ(command.output().candidate_window().focused_index(), 0);
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "visible first");
+  EXPECT_EQ(command.output().candidate_window().candidate(1).value(),
+            "visible second");
+  EXPECT_PREEDIT("visible first", command);
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
+       DelayedLiveConversionCommitFirstUsesDisplayedSuggestion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter =
+      CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  session.SetConfig(config);
+
+  Segments old_suggestion;
+  Segment* old_segment = old_suggestion.add_segment();
+  old_segment->set_key("あ");
+  AddCandidate("あ", "old hidden suggestion", old_segment);
+  Segments new_suggestion;
+  Segment* new_segment = new_suggestion.add_segment();
+  new_segment->set_key("あい");
+  AddCandidate("あい", "visible first", new_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(old_suggestion), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(new_suggestion), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  command.Clear();
+  ASSERT_TRUE(SendKey("i", &session, &command));
+  ASSERT_TRUE(command.output().live_conversion_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "visible first");
+
+  Mock::VerifyAndClearExpectations(converter.get());
+  // CommitSuggestionInternal() must first commit the segment successfully;
+  // otherwise it returns before FinishConversion() is invoked.
+  EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*converter, FinishConversion(_, _))
+      .WillOnce(SetArgPointee<1>(Segments()));
+  command.Clear();
+  ASSERT_TRUE(session.CommitFirstSuggestion(&command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("visible first", command);
+  EXPECT_EQ(session.context().state(), ImeContext::PRECOMPOSITION);
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
+       DelayedLiveConversionSelectCandidateByIdUsesDisplayedContext) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter =
+      CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(1000);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  session.SetConfig(config);
+
+  Segments old_suggestion;
+  Segment* old_segment = old_suggestion.add_segment();
+  old_segment->set_key("あ");
+  AddCandidate("あ", "old hidden suggestion", old_segment);
+  Segments new_suggestion;
+  Segment* new_segment = new_suggestion.add_segment();
+  new_segment->set_key("あい");
+  AddCandidate("あい", "visible first", new_segment);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(old_suggestion), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(new_suggestion), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  command.Clear();
+  ASSERT_TRUE(SendKey("i", &session, &command));
+  ASSERT_TRUE(command.output().live_conversion_pending());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  const int displayed_id = command.output().candidate_window().candidate(0).id();
+
+  Mock::VerifyAndClearExpectations(converter.get());
+  EXPECT_CALL(*converter, StartPrediction(_, _)).Times(0);
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .Times(0);
+  EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+      .Times(AtLeast(1))
+      .WillRepeatedly(Return(true));
+
+  command.Clear();
+  SetSendCommandCommand(commands::SessionCommand::SELECT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(displayed_id);
+  ASSERT_TRUE(session.SendCommand(&command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_PREEDIT("visible first", command);
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  Mock::VerifyAndClearExpectations(converter.get());
+}
+
+TEST_F(SessionTest,
        HeldPendingRomanSuggestionUsesExactDisplayedSuggestionContext) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
