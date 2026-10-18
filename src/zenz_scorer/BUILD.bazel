@@ -41,8 +41,8 @@ mozc_cc_library(
     name = "llama_server_process",
     srcs = ["llama_server_process.cc"],
     hdrs = [
-        "llama_server_process.h",
         "llama_server_guard_protocol.h",
+        "llama_server_process.h",
     ],
     target_compatible_with = ["@platforms//os:macos"],
     deps = [":llama_http_client"],
