@@ -195,16 +195,31 @@ def wait_healthy(proc, port, key, seconds=MAX_READY):
 
 
 def wait_socket(proc, path, seconds=MAX_READY):
+    # Do not connect here. A connect-and-close without a Zenz wire request
+    # can race accepted-socket configuration on macOS and terminate the scorer
+    # (client_configure_failed_errno_22). Real authenticated wire inference is
+    # exercised independently by verify_release_package.zsh on each host.
+    # This gate only establishes that our new scorer created its private socket.
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         need(proc.poll() is None, "REAL_SCORER_EXITED_BEFORE_READY")
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                sock.connect(str(path))
-            return
-        except (OSError, TimeoutError):
+            info = path.lstat()
+        except FileNotFoundError:
             time.sleep(0.35)
+            continue
+        need(stat.S_ISSOCK(info.st_mode), "SCORER_SOCKET_IS_NOT_UNIX_SOCKET")
+        need(info.st_uid == os.geteuid(), "SCORER_SOCKET_OWNER_MISMATCH")
+        need((stat.S_IMODE(info.st_mode) & 0o077) == 0,
+             "SCORER_SOCKET_PERMISSIONS_NOT_PRIVATE")
+        parent_info = path.parent.lstat()
+        need(stat.S_ISDIR(parent_info.st_mode) and
+             parent_info.st_uid == os.geteuid(),
+             "SCORER_SOCKET_DIRECTORY_OWNER_OR_TYPE_MISMATCH")
+        need((stat.S_IMODE(parent_info.st_mode) & 0o077) == 0,
+             "SCORER_SOCKET_DIRECTORY_PERMISSIONS_NOT_PRIVATE")
+        need(proc.poll() is None, "REAL_SCORER_EXITED_AFTER_SOCKET_CREATION")
+        return
     raise RuntimeError("REAL_SCORER_SOCKET_TIMEOUT")
 
 
