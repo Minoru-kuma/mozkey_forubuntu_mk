@@ -90,6 +90,7 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
 - ローマ字入力中、確定済みの読みの後ろに未解決のローマ字 suffix が残る間は、入力途中の一時的な Roman prefix ごとに passive suggestion を再計算して候補ウィンドウがちらつくのを抑えるため、直前まで表示していた候補を保持。suffix が解決した時点で更新を再開し、候補へ移動する場合も表示中の候補集合をそのまま使用
+- 明示的に選んで確定したサジェストについて、候補が持つ全文の読みと、通常変換で検証できた文節・候補順位を使ってユーザーセグメント履歴の学習を補強。確定結果やサジェスト履歴は従来どおり維持し、検証できない文節や順位は推測で学習しない
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
 - `うっそ`、`くっそ`、`やっば`、`すっげぇ`、`めっちゃ`、`ちっす`、`ちょりっす`、`ほえ～`、`ほぇ～`、`ほっほーん` などの expressive kana を生成辞書で自然なかな候補として補強
@@ -474,6 +475,20 @@ Zenz ライブ補正では、Zenzai v3/v3.2 の特殊トークン形式に沿っ
 - `医師とは` としての末尾込みの学習は取り消し
 
 これにより、変換確定直後の修正操作がユーザーの意図に近い形で履歴学習へ反映されます。
+
+### サジェスト確定時の全文読み・文節単位の学習
+
+入力途中の短い読みから、より長い文章のサジェストを**明示的に選んで確定した場合**、Mozkey は候補が保持する全文の読みを確認し、通常変換で得られる候補と文節構造を使って、ユーザーセグメント履歴に表記選好を反映できるようにしています。
+
+たとえば `わたし` の入力中に、全文の読みが `わたしのなまえ` である `私の名前` がサジェストとして表示され、それを選んで確定した場合、読みと表記の対応を検証できた文節について、その後の通常変換へ選択履歴を反映します。入力した短い接頭部分だけを、全文の読みと取り違えて学習することは避けます。
+
+学習用の検証では、候補の元データに文節境界があればそれを参照し、境界がなければ通常変換や安全な逆読み解析から対応関係を探します。**実際の通常変換で候補がどう並ぶか**を基準に、先頭候補ではない表記を明示的に選択した場合の強い学習を判断します。辞書の内部的な候補順だけを表示順位として扱いません。候補・読み・文節境界・順位の対応を十分に検証できない場合は、推測に基づく文節単位の追加学習を見送ります。
+
+この検証は元の確定結果を差し替えず、通常のサジェスト履歴や、他の確定時処理を重複して実行しません。Undo で直前の学習が取り消された後に同じ読みを再確定した場合には、保留中の古い取り消し処理を**新しい学習および候補順位の検証より前**に適用し、新しく確定した選好が誤って消されることを防ぎます。
+
+通常の履歴学習が無効な場合や、シークレットモード、パスワード欄、private input などの学習禁止条件では、この追加学習を行いません。対象は対応する通常のデスクトップサジェスト確定であり、モバイル向け mixed conversion や zero-query suggestion へ無条件に拡張するものではありません。**Zenz 補正フィードバックの保存・再利用とは別の Mozc サジェスト学習経路**です。
+
+この追加学習経路は Windows でビルド・回帰テスト・実機確認を行っています。macOS での本変更の実機動作は未検証です。
 
 ### 複数コマンドのキー割り当て
 
@@ -982,6 +997,7 @@ Main features added in this fork
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
 - Reduces candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes after an already resolved reading; Mozkey holds the currently displayed suggestion list until the suffix resolves, then resumes refresh, and entering the list keeps the exact displayed candidates
+- For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
 - Reinforces expressive kana forms such as `うっそ`, `くっそ`, `やっば`, `すっげぇ`, `めっちゃ`, `ちっす`, `ちょりっす`, `ほえ～`, `ほぇ～`, and `ほっほーん` with natural-kana generated dictionary candidates
@@ -1547,6 +1563,20 @@ For example:
 - The tail-specific learning for `医師とは` is reverted
 
 This makes immediate correction after conversion confirmation behave closer to user intent.
+
+### Learning complete readings and segment preferences from accepted suggestions
+
+When a user **explicitly selects and commits** a suggestion whose reading extends beyond the typed prefix, Mozkey can use the suggestion's complete reading and the segments verified against ordinary conversion to learn spelling preferences in Mozc's user-segment history.
+
+For example, selecting `私の名前` (complete reading `わたしのなまえ`) from a suggestion shown after typing only `わたし` can teach the verified individual segments to ordinary conversion. The system does not mistake the shorter typed prefix for the reading of the entire accepted phrase.
+
+If the suggestion provides segment boundaries, Mozkey checks them; otherwise, it may establish correspondence through normal conversion or strictly verified reverse-reading resolution. Strong selection-history markers use the candidate ordering **after normal-conversion postprocessing**, not the raw dictionary order. If the candidate surface, reading, segment boundaries, or displayed ranking cannot be established reliably, the extra segment-level learning is skipped rather than guessed.
+
+The normal committed text and existing suggestion-history learning are preserved, and other commit handlers are not run a second time. Pending cleanup from a preceding Undo is resolved **before** examining displayed candidate ranks or writing a new preference, so an earlier deferred Undo cannot remove a newly recommitted preference.
+
+This additional learning obeys the existing history and privacy gates, including Incognito, password fields, and private input. It applies to supported desktop suggestion commits, not indiscriminately to mobile mixed conversion or zero-query suggestions. It is distinct from Zenz correction-feedback learning and reuse.
+
+This learning path has been built, regression-tested, and exercised on Windows. The macOS runtime behavior of this change has not yet been verified.
 
 ### Multiple commands per key binding
 

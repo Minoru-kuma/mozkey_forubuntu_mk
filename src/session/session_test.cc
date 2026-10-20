@@ -21169,6 +21169,224 @@ TEST_F(SessionTest, CommitCandidateAt3rdOf3Segments) {
   EXPECT_RESULT("猫のしっぽを抜いた", command);
 }
 
+// Both un-focused and focused desktop suggestion commits must carry the
+// verified-learning request, and the focused path must preserve the displayed
+// candidate ID without calling Predict() again. Use unrelated synthetic text.
+TEST_F(SessionTest, ExplicitDesktopSuggestionCommitKeepsLearningProvenance) {
+  for (const bool focus_first : {false, true}) {
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    session.SetConfig(config);
+
+    Segments suggestions;
+    Segment* segment = suggestions.add_segment();
+    segment->set_key("あ");
+    AddCandidate("あ", "亜", segment);
+    AddCandidate("あおぞら", "青空", segment);
+
+    EXPECT_CALL(*converter, StartPrediction(_, _))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+    commands::Command command;
+    ASSERT_TRUE(SendKey("a", &session, &command));
+    ASSERT_TRUE(command.output().has_candidate_window());
+    ASSERT_GE(command.output().candidate_window().candidate_size(), 2);
+    ASSERT_EQ(command.output().candidate_window().candidate(1).value(),
+              "青空");
+    const int candidate_id =
+        command.output().candidate_window().candidate(1).id();
+
+    // The choice was already displayed: re-prediction could reuse the same
+    // integer ID for a different semantic candidate.
+    Mock::VerifyAndClearExpectations(converter.get());
+    EXPECT_CALL(*converter, StartPrediction(_, _)).Times(0);
+    EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+        .Times(0);
+    EXPECT_CALL(*converter, PrependCandidates(_, _, _)).Times(0);
+    if (focus_first) {
+      EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+          .WillRepeatedly(Return(true));
+      command.Clear();
+      SetSendCommandCommand(commands::SessionCommand::SELECT_CANDIDATE,
+                            &command);
+      command.mutable_input()->mutable_command()->set_id(candidate_id);
+      ASSERT_TRUE(session.SendCommand(&command));
+      ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+    }
+
+    Segments selected = suggestions;
+    selected.mutable_conversion_segment(0)->move_candidate(1, 0);
+    EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+        .WillOnce(DoAll(SetArgPointee<0>(selected), Return(true)));
+    bool saw_learning = false;
+    EXPECT_CALL(*converter, FinishConversion(_, _))
+        .WillOnce(Invoke([&saw_learning](const ConversionRequest& request,
+                                        Segments* segments) {
+          saw_learning =
+              request.options().enable_verified_suggestion_segment_learning &&
+              request.options().enable_user_history_for_conversion &&
+              request.request_type() == ConversionRequest::CONVERSION;
+          segments->clear_conversion_segments();
+        }));
+    command.Clear();
+    SetSendCommandCommand(commands::SessionCommand::SUBMIT_CANDIDATE,
+                          &command);
+    command.mutable_input()->mutable_command()->set_id(candidate_id);
+    ASSERT_TRUE(session.SendCommand(&command));
+    EXPECT_TRUE(saw_learning);
+    EXPECT_RESULT("青空", command);
+  }
+}
+
+// Focusing an explicitly displayed suggestion must not prevent the
+// historical end-of-list transition into the expanded prediction list.
+// The transition is intentional: Predict() clears suggestion provenance.
+TEST_F(SessionTest, FocusedSuggestionCanExpandMatchingPrediction) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  session.SetConfig(config);
+
+  Segments suggestions;
+  Segment* segment = suggestions.add_segment();
+  segment->set_key("あ");
+  AddCandidate("あ", "亜", segment);
+  AddCandidate("あおぞら", "青空", segment);
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .WillRepeatedly(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+  ASSERT_EQ(command.output().candidate_window().candidate_size(), 2);
+  const int last_id = command.output().candidate_window().candidate(1).id();
+
+  EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+      .WillRepeatedly(Return(true));
+  command.Clear();
+  SetSendCommandCommand(commands::SessionCommand::SELECT_CANDIDATE, &command);
+  command.mutable_input()->mutable_command()->set_id(last_id);
+  ASSERT_TRUE(session.SendCommand(&command));
+  ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+
+  // Navigating beyond the last displayed suggestion expands the list only
+  // when the held suggestion key matches the current composer reading.
+  Segments expanded;
+  Segment* next = expanded.add_segment();
+  next->set_key("あ");
+  AddCandidate("あ", "亜", next);
+  AddCandidate("あおぞら", "青空", next);
+  AddCandidate("あさ", "朝", next);
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .WillOnce(DoAll(SetArgPointee<2>(expanded), Return(true)));
+  command.Clear();
+  ASSERT_TRUE(SendKey("Space", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+}
+
+// Prediction expansion must not reuse an index from the previous suggestion
+// list after it has been rebuilt. A surviving candidate is tracked by exact
+// reading/surface, and a failed or empty expansion retains the held list.
+TEST_F(SessionTest, FocusedSuggestionExpansionSurvivesReplacementEdgeCases) {
+  for (int scenario = 0; scenario < 5; ++scenario) {
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    session.SetConfig(config);
+
+    Segments suggestions;
+    Segment* first = suggestions.add_segment();
+    first->set_key("あ");
+    AddCandidate("あ", "亜", first);
+    AddCandidate("あおぞら", "青空", first);
+    AddCandidate("あさ", "朝", first);
+    EXPECT_CALL(*converter, StartPrediction(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(suggestions), Return(true)));
+
+    commands::Command command;
+    ASSERT_TRUE(SendKey("a", &session, &command));
+    ASSERT_TRUE(command.output().has_candidate_window());
+    ASSERT_EQ(command.output().candidate_window().candidate_size(), 3);
+    const int last_id = command.output().candidate_window().candidate(2).id();
+
+    EXPECT_CALL(*converter, FocusSegmentValue(_, 0, _))
+        .WillRepeatedly(Return(true));
+    command.Clear();
+    SetSendCommandCommand(commands::SessionCommand::SELECT_CANDIDATE,
+                          &command);
+    command.mutable_input()->mutable_command()->set_id(last_id);
+    ASSERT_TRUE(session.SendCommand(&command));
+    ASSERT_EQ(session.context().state(), ImeContext::CONVERSION);
+
+    // Scenario 0: the previously focused candidate moves to index 0 while
+    // the expanded list shrinks from three to two entries.
+    // Scenario 1: that candidate disappears altogether.
+    // Scenario 2: predictor reports success but returns zero segments.
+    // Scenario 3: predictor reports failure even after returning a segment.
+    // Scenario 4: predictor returns a segment without any candidates.
+    Segments replacement;
+    if (scenario != 2) {
+      Segment* next = replacement.add_segment();
+      next->set_key("あ");
+      if (scenario == 0) {
+        AddCandidate("あさ", "朝", next);
+        AddCandidate("あ", "亜", next);
+      } else if (scenario == 1) {
+        AddCandidate("あ", "阿", next);
+      } else if (scenario == 3) {
+        AddCandidate("あか", "赤", next);
+      }
+    }
+    EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+        .WillOnce(DoAll(SetArgPointee<2>(replacement),
+                        Return(scenario != 3)));
+    command.Clear();
+    ASSERT_TRUE(SendKey("Space", &session, &command));
+    EXPECT_TRUE(command.output().consumed());
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    EXPECT_PREEDIT(scenario == 1 ? "阿" : "亜", command);
+    ASSERT_TRUE(command.output().has_candidate_window());
+    EXPECT_EQ(command.output().candidate_window().candidate_size(),
+              scenario == 0 ? 2 : (scenario == 1 ? 1 : 3));
+
+    if (scenario == 3) {
+      // A failed expansion still leaves this as a focused suggestion, so the
+      // verified-suggestion learning provenance must survive until commit.
+      EXPECT_CALL(*converter, CommitSegmentValue(_, 0, _))
+          .WillOnce(DoAll(SetArgPointee<0>(suggestions), Return(true)));
+      bool saw_learning = false;
+      EXPECT_CALL(*converter, FinishConversion(_, _))
+          .WillOnce(Invoke([&saw_learning](const ConversionRequest& request,
+                                          Segments* segments) {
+            saw_learning =
+                request.options().enable_verified_suggestion_segment_learning;
+            segments->clear_conversion_segments();
+          }));
+      command.Clear();
+      SetSendCommandCommand(commands::SessionCommand::SUBMIT_CANDIDATE,
+                            &command);
+      command.mutable_input()->mutable_command()->set_id(0);
+      ASSERT_TRUE(session.SendCommand(&command));
+      EXPECT_TRUE(saw_learning);
+    }
+  }
+}
+
 TEST_F(SessionTest, CommitCandidateSuggestion) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

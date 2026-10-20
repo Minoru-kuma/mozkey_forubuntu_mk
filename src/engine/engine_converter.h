@@ -479,6 +479,11 @@ class EngineConverter : public EngineConverterInterface {
   // instead of request_type_.
   ConversionRequest::RequestType request_type_;
 
+  // True only for a candidate focused from the displayed suggestion list.
+  // Do not confuse this with a normally generated prediction candidate.
+  // Reset on new prediction/conversion, cancel, and commit.
+  bool focused_suggestion_for_learning_ = false;
+
   // Default conversion preferences.
   ConversionPreferences conversion_preferences_;
 
