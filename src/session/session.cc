@@ -3748,10 +3748,21 @@ bool Session::SelectCandidateInternal(commands::Command* command) {
     return false;
   }
 
+  // A candidate ID from the visible SUGGESTION list must be resolved
+  // against that very list, not against a newly generated PREDICTION list.
+  // FocusSuggestionCandidateWithoutPrediction also retains the provenance
+  // needed when the later commit uses EngineConverter::Commit().
+  if (context_->converter().CheckState(EngineConverterInterface::SUGGESTION)) {
+    if (!context_->mutable_converter()
+             ->FocusSuggestionCandidateWithoutPrediction(
+                 command->input().command().id())) {
+      return false;
+    }
+  } else {
+    context_->mutable_converter()->CandidateMoveToId(
+        command->input().command().id(), context_->composer());
+  }
   command->mutable_output()->set_consumed(true);
-
-  context_->mutable_converter()->CandidateMoveToId(
-      command->input().command().id(), context_->composer());
   SetSessionState(ImeContext::CONVERSION, context_.get());
 
   return true;
