@@ -4448,9 +4448,9 @@ ConversionRequest MakeSuggestionLearningProbeRequest(
   ConversionRequest::Options options;
   options.enable_verified_suggestion_segment_learning = enabled;
   return ConversionRequestBuilder()
-      .SetKey(key)
       .SetConfig(config)
       .SetOptions(options)
+      .SetKey(key)
       .Build();
 }
 
