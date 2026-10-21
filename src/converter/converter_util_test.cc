@@ -31,6 +31,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
@@ -190,6 +191,18 @@ TEST(ConverterUtilTest, CandidateAndResultRoundTripWithEmptyBoundary) {
   EXPECT_EQ(new_cand.ranking_constraints, candidate.ranking_constraints);
   EXPECT_EQ(new_cand.consumed_key_size, candidate.consumed_key_size);
   EXPECT_EQ(new_cand.inner_segment_boundary, result.inner_segment_boundary);
+
+  // The move-enabled path must preserve content, boundary and Mozkey-specific
+  // ranking constraints, just as the const-lvalue call does.
+  prediction::Result movable_result = result;
+  Candidate moved_cand;
+  PopulateCandidateFromResult(std::move(movable_result), &moved_cand);
+  EXPECT_EQ(moved_cand.key, candidate.key);
+  EXPECT_EQ(moved_cand.value, candidate.value);
+  EXPECT_EQ(moved_cand.content_key, candidate.content_key);
+  EXPECT_EQ(moved_cand.content_value, candidate.content_value);
+  EXPECT_EQ(moved_cand.ranking_constraints, RankingConstraint::NO_TOP);
+  EXPECT_EQ(moved_cand.inner_segment_boundary, result.inner_segment_boundary);
 }
 
 TEST(ConverterUtilTest,
