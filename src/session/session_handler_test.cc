@@ -895,4 +895,65 @@ TEST_F(SessionHandlerTest, ReloadFromMinimalEngine) {
   EXPECT_EQ(handler.GetDataVersion(), mock_version_);
 }
 
+TEST_F(SessionHandlerTest, AddUserHistoryRespectsPrivacySettings) {
+  auto engine = std::make_unique<MockEngine>();
+  // The normal configuration permits the command; disabled modes must not
+  // reach the engine even when explicitly requested by the client.
+  EXPECT_CALL(*engine, AddUserHistory("とうきょう", "東京"))
+      .Times(2)
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*engine, Reload()).WillRepeatedly(Return(true));
+  SessionHandler handler(std::move(engine));
+
+  commands::Command add_command;
+  add_command.mutable_input()->set_type(commands::Input::ADD_USER_HISTORY);
+  add_command.mutable_input()->mutable_user_history_data()->set_key(
+      "とうきょう");
+  add_command.mutable_input()->mutable_user_history_data()->set_value("東京");
+
+  auto add_history = [&]() {
+    add_command.mutable_output()->Clear();
+    EXPECT_TRUE(handler.EvalCommand(&add_command));
+    return add_command.output().error_code();
+  };
+  auto update_config = [&](const config::Config& new_config) {
+    commands::Command command;
+    command.mutable_input()->set_type(commands::Input::SET_CONFIG);
+    *command.mutable_input()->mutable_config() = new_config;
+    EXPECT_TRUE(handler.EvalCommand(&command));
+    EXPECT_EQ(command.output().error_code(),
+              commands::Output::SESSION_SUCCESS);
+  };
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_incognito_mode(false);
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  config.set_use_history_suggest(true);
+  update_config(config);
+  EXPECT_EQ(add_history(), commands::Output::SESSION_SUCCESS);
+
+  // Incognito suppresses explicit user-history additions.
+  config.set_incognito_mode(true);
+  update_config(config);
+  EXPECT_EQ(add_history(), commands::Output::SESSION_FAILURE);
+
+  // Disabling learning suppresses explicit user-history additions.
+  config.set_incognito_mode(false);
+  config.set_history_learning_level(config::Config::NO_HISTORY);
+  update_config(config);
+  EXPECT_EQ(add_history(), commands::Output::SESSION_FAILURE);
+
+  // User history suggestions disabled: no explicit history additions.
+  config.set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  config.set_use_history_suggest(false);
+  update_config(config);
+  EXPECT_EQ(add_history(), commands::Output::SESSION_FAILURE);
+
+  // Re-enabling all three settings restores the normal behavior.
+  config.set_use_history_suggest(true);
+  update_config(config);
+  EXPECT_EQ(add_history(), commands::Output::SESSION_SUCCESS);
+}
+
 }  // namespace mozc
