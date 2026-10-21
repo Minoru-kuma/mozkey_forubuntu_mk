@@ -1680,7 +1680,8 @@ void Converter::ApplyResultToSegments(const prediction::Result& result,
   const size_t inner_segment_count = result.inner_segments().size();
   for (const auto& inner_seg : result.inner_segments()) {
     if (seg_idx >= segments->conversion_segments_size()) break;
-    Segment* segment = segments->mutable_conversion_segment(seg_idx++);
+    const size_t current_seg_idx = seg_idx++;
+    Segment* segment = segments->mutable_conversion_segment(current_seg_idx);
     const uint8_t ranking_constraints =
         (result.inner_segment_ranking_constraints.size() ==
          inner_segment_count)
@@ -1709,8 +1710,9 @@ void Converter::ApplyResultToSegments(const prediction::Result& result,
       // the same surface.  Keep NO_TOP only when both derivations require it.
       // This preserves the explicit non-EMOTICON user-dictionary escape hatch.
       cand->ranking_constraints &= ranking_constraints;
-      if (!result.inner_segment_boundary.empty()) {
-        cand->inner_segment_boundary = result.inner_segment_boundary;
+      if (current_seg_idx < result.inner_segment_boundary.size()) {
+        cand->inner_segment_boundary = {
+            result.inner_segment_boundary[current_seg_idx]};
       }
     } else {
       Candidate* cand = (pos == 0) ? segment->push_front_candidate()
@@ -1726,7 +1728,10 @@ void Converter::ApplyResultToSegments(const prediction::Result& result,
       cand->attributes = (result.attributes | additional_attributes);
       cand->ranking_constraints = ranking_constraints;
       cand->consumed_key_size = result.consumed_key_size;
-      cand->inner_segment_boundary = result.inner_segment_boundary;
+      if (current_seg_idx < result.inner_segment_boundary.size()) {
+        cand->inner_segment_boundary = {
+            result.inner_segment_boundary[current_seg_idx]};
+      }
     }
   }
 }
