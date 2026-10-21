@@ -92,19 +92,22 @@ std::vector<prediction::Result> ConversionSegmentsToResults(
 prediction::Result CandidateToResult(const Candidate& candidate);
 
 // Populates Candidate fields from a prediction::Result.
+// Takes Result by value to allow callers to move key, value, description,
+// display_value, and inner_segment_boundary directly into Candidate.
+// Passing an lvalue still copies Result; use std::move for an rvalue.
 //
 // Boundary handling:
-// - Copies result.inner_segment_boundary directly to
+// - Moves result.inner_segment_boundary directly to
 //   candidate->inner_segment_boundary.
 // - Automatically updates candidate->content_key and candidate->content_value
-//   from result.inner_segments().GetMergedContentKeyAndValue().
+//   from result.inner_segments().GetMergedContentKeyAndValue() before the move.
 //
 // Note: This function only updates fields present in Result (key, value,
 // content_key/value, cost, wcost, lid, rid, attributes, ranking constraints,
 // consumed_key_size, inner_segment_boundary, description, display_value).
 // Pre-existing Candidate metadata (such as category, command, usage_id,
 // prefix, suffix) is preserved.
-void PopulateCandidateFromResult(const prediction::Result& result,
+void PopulateCandidateFromResult(prediction::Result result,
                                  Candidate* candidate);
 
 // Enforces hard final-ranking constraints after normal conversion ranking.

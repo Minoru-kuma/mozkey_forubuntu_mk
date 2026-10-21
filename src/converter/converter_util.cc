@@ -167,13 +167,16 @@ prediction::Result CandidateToResult(const Candidate& candidate) {
   return result;
 }
 
-void PopulateCandidateFromResult(const prediction::Result& result,
+void PopulateCandidateFromResult(prediction::Result result,
                                  Candidate* candidate) {
   DCHECK(candidate);
-  strings::Assign(candidate->key, result.key);
-  strings::Assign(candidate->value, result.value);
-  strings::Assign(candidate->description, result.description);
-  strings::Assign(candidate->display_value, result.display_value);
+  // Derive content before moving key/value and the boundary data.
+  std::tie(candidate->content_key, candidate->content_value) =
+      result.inner_segments().GetMergedContentKeyAndValue();
+  candidate->key = std::move(result.key);
+  candidate->value = std::move(result.value);
+  candidate->description = std::move(result.description);
+  candidate->display_value = std::move(result.display_value);
   candidate->lid = result.lid;
   candidate->rid = result.rid;
   candidate->wcost = result.wcost;
@@ -181,9 +184,7 @@ void PopulateCandidateFromResult(const prediction::Result& result,
   candidate->attributes = result.attributes;
   candidate->ranking_constraints = result.ranking_constraints;
   candidate->consumed_key_size = result.consumed_key_size;
-  candidate->inner_segment_boundary = result.inner_segment_boundary;
-  std::tie(candidate->content_key, candidate->content_value) =
-      result.inner_segments().GetMergedContentKeyAndValue();
+  candidate->inner_segment_boundary = std::move(result.inner_segment_boundary);
 #ifndef NDEBUG
   absl::StrAppend(&candidate->log, "\n", result.log);
 #endif  // NDEBUG
