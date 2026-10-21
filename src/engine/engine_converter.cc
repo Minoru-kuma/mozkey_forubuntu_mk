@@ -1305,14 +1305,16 @@ bool EngineConverter::CommitSuggestionById(const int id,
 void EngineConverter::CommitHeadToFocusedSegments(
     const composer::Composer& composer, const commands::Context& context,
     size_t* consumed_key_size) {
-  CommitSegmentsInternal(composer, context, segment_index_ + 1,
+  CommitSegmentsInternal(composer, context,
+                         segment_index_ + GetSegmentSpan(segment_index_),
                          consumed_key_size);
 }
 
 void EngineConverter::CommitFirstSegment(const composer::Composer& composer,
                                          const commands::Context& context,
                                          size_t* consumed_key_size) {
-  CommitSegmentsInternal(composer, context, 1, consumed_key_size);
+  CommitSegmentsInternal(composer, context, GetSegmentSpan(0),
+                         consumed_key_size);
 }
 
 void EngineConverter::CommitSegmentsInternal(const composer::Composer& composer,
@@ -1348,16 +1350,15 @@ void EngineConverter::CommitSegmentsInternal(const composer::Composer& composer,
     return;
   }
 
-  std::vector<size_t> candidate_ids;
   for (size_t i = 0; i < segments_to_commit; ++i) {
-    // Get the i-th (0 origin) conversion segment and the selected candidate.
-    const Segment& segment = segments_.conversion_segment(i);
+    // Accumulate the size of every covered raw segment's key so that the
+    // composer consumes the entire reading of multi-segment candidates.
+    *consumed_key_size += segments_.conversion_segment(i).key_len();
+  }
 
-    // Accumulate the size of i-th segment's key.
-    // The caller will remove corresponding characters from the composer.
-    *consumed_key_size += segment.key_len();
-
-    // Collect candidate's id for each segment.
+  std::vector<size_t> candidate_ids;
+  for (size_t i = 0; i < segments_to_commit; i += GetSegmentSpan(i)) {
+    // Select one candidate per logical segment, skipping covered segments.
     candidate_ids.push_back(GetCandidateIndexForConverter(i));
   }
   if (!converter_->CommitSegments(&segments_, candidate_ids)) {

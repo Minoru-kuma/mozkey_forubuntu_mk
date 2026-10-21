@@ -59,7 +59,9 @@ std::optional<prediction::Result> ConversionSegmentsToResult(
 
   prediction::Result result;
   InnerSegmentBoundaryBuilder builder;
-  for (const Segment& segment : segments) {
+  int last_rid = 0;
+  for (size_t i = 0; i < segments.size();) {
+    const Segment& segment = segments[i];
     if (segment.candidates_size() == 0) {
       return std::nullopt;
     }
@@ -68,17 +70,22 @@ std::optional<prediction::Result> ConversionSegmentsToResult(
     absl::StrAppend(&result.value, candidate.value);
     result.attributes |= candidate.attributes;
     result.ranking_constraints |= candidate.ranking_constraints;
-    result.inner_segment_ranking_constraints.push_back(
-        candidate.ranking_constraints);
     result.wcost += candidate.wcost;
     result.cost += candidate.cost;
-    builder.Add(candidate.key.size(), candidate.value.size(),
-                candidate.content_key.size(), candidate.content_value.size());
+    // A multi-segment candidate may itself contain several inner boundaries.
+    // Preserve Mozkey's ordering constraint at every resulting boundary.
+    for (const InnerSegments::IteratorData& data : candidate.inner_segments()) {
+      builder.Add(data);
+      result.inner_segment_ranking_constraints.push_back(
+          candidate.ranking_constraints);
+    }
+    last_rid = candidate.rid;
+    i += candidate.effective_converted_segment_count();
   }
 
   result.inner_segment_boundary = builder.Build(result.key, result.value);
   result.lid = segments.front().candidate(0).lid;
-  result.rid = segments.back().candidate(0).rid;
+  result.rid = last_rid;
 
   return result;
 }
