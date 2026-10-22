@@ -66,6 +66,7 @@ class NumberRewriter : public RewriterInterface {
               const Segments& segments) override;
 
  private:
+  bool RewriteTopCandidateForSuggestion(Segment* segment) const;
   bool RewriteOneSegment(const ConversionRequest& request, Segment* segment,
                          Segments* segments) const;
   void RememberNumberStyle(const converter::Candidate& candidate);
