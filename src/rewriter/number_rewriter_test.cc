@@ -34,6 +34,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
@@ -45,6 +46,7 @@
 #include "config/character_form_manager.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
+#include "converter/inner_segment.h"
 #include "converter/segments.h"
 #include "converter/segments_matchers.h"
 #include "data_manager/testing/mock_data_manager.h"
@@ -2145,6 +2147,140 @@ TEST_F(NumberRewriterTest, RerankShortNumbersAfterSeparatedOrArabicKanjiStyle) {
     EXPECT_FALSE(segments.conversion_segment(0).candidate(0).attributes &
                  converter::Attribute::NO_VARIANTS_EXPANSION);
   }
+}
+
+
+TEST_F(NumberRewriterTest, RealtimeNumberCounterKanjiCandidate) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+  commands::Request command;
+  command.set_mixed_conversion(true);
+  command.mutable_decoder_experiment_params()
+      ->set_suppress_realtime_conversion_with_converter(true);
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequest(command)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("にしゅうかん");
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->key = "にしゅうかん";
+  candidate->content_key = "にしゅうかん";
+  candidate->value = "2週間";
+  candidate->content_value = "2週間";
+  candidate->lid = pos_matcher_.GetGeneralNounId();
+  candidate->rid = pos_matcher_.GetGeneralNounId();
+  candidate->attributes |= converter::Attribute::REALTIME_CONVERSION;
+
+  EXPECT_TRUE(rewriter->Rewrite(request, &segments));
+  ASSERT_GE(seg->candidates_size(), 2);
+  EXPECT_EQ(seg->candidate(0).value, "二週間");
+  EXPECT_EQ(seg->candidate(1).value, "2週間");
+  EXPECT_TRUE(seg->candidate(0).attributes &
+              converter::Attribute::NO_EXTRA_DESCRIPTION);
+  EXPECT_EQ(seg->candidate(0).content_value, "二週間");
+  EXPECT_FALSE(rewriter->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidate(0).value, "二週間");
+}
+
+TEST_F(NumberRewriterTest, RealtimeNumberCounterInnerBoundaries) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+  commands::Request command;
+  command.set_mixed_conversion(true);
+  command.mutable_decoder_experiment_params()
+      ->set_suppress_realtime_conversion_with_converter(true);
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequest(command)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("かいしからにしゅうかん");
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->key = "かいしからにしゅうかん";
+  candidate->content_key = candidate->key;
+  candidate->value = "開始から2週間";
+  candidate->content_value = candidate->value;
+  candidate->lid = pos_matcher_.GetGeneralNounId();
+  candidate->rid = pos_matcher_.GetGeneralNounId();
+  candidate->attributes |= converter::Attribute::REALTIME_CONVERSION;
+  converter::InnerSegmentBoundaryBuilder builder;
+  builder.Add(std::string("かいしから").size(), std::string("開始から").size(),
+              std::string("かいしから").size(), std::string("開始から").size());
+  builder.Add(std::string("にしゅうかん").size(), std::string("2週間").size(),
+              std::string("にしゅうかん").size(), std::string("2週間").size());
+  candidate->inner_segment_boundary =
+      builder.Build(candidate->key, candidate->value);
+  ASSERT_EQ(candidate->inner_segment_boundary.size(), 2);
+
+  EXPECT_TRUE(rewriter->Rewrite(request, &segments));
+  ASSERT_GE(seg->candidates_size(), 2);
+  EXPECT_EQ(seg->candidate(0).value, "開始から二週間");
+  EXPECT_EQ(seg->candidate(1).value, "開始から2週間");
+  ASSERT_EQ(seg->candidate(0).inner_segments().size(), 2);
+  std::vector<std::string> inner_values;
+  for (const auto& inner : seg->candidate(0).inner_segments()) {
+    inner_values.emplace_back(inner.GetValue());
+  }
+  EXPECT_THAT(inner_values, ::testing::ElementsAre("開始から", "二週間"));
+}
+
+TEST_F(NumberRewriterTest, RealtimeNumberCounterSkipsUserDictionary) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+  commands::Request command;
+  command.set_mixed_conversion(true);
+  command.mutable_decoder_experiment_params()
+      ->set_suppress_realtime_conversion_with_converter(true);
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequest(command)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("にしゅうかん");
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->key = "にしゅうかん";
+  candidate->content_key = "にしゅうかん";
+  candidate->value = "2週間";
+  candidate->content_value = "2週間";
+  candidate->lid = pos_matcher_.GetGeneralNounId();
+  candidate->rid = pos_matcher_.GetGeneralNounId();
+  candidate->attributes |= (converter::Attribute::REALTIME_CONVERSION |
+                            converter::Attribute::USER_DICTIONARY);
+  EXPECT_FALSE(rewriter->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidates_size(), 1);
+  EXPECT_EQ(seg->candidate(0).value, "2週間");
+}
+
+TEST_F(NumberRewriterTest, RealtimeNumberCounterRequiresFlag) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+  commands::Request command;
+  command.set_mixed_conversion(true);
+  command.mutable_decoder_experiment_params()
+      ->set_suppress_realtime_conversion_with_converter(false);
+  const ConversionRequest request =
+      ConversionRequestBuilder()
+          .SetRequest(command)
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("にしゅうかん");
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->key = "にしゅうかん";
+  candidate->content_key = "にしゅうかん";
+  candidate->value = "2週間";
+  candidate->content_value = "2週間";
+  candidate->lid = pos_matcher_.GetGeneralNounId();
+  candidate->rid = pos_matcher_.GetGeneralNounId();
+  candidate->attributes |= converter::Attribute::REALTIME_CONVERSION;
+  EXPECT_FALSE(rewriter->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidates_size(), 1);
 }
 
 }  // namespace mozc
