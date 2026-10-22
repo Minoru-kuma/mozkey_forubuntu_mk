@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <memory>
 #include <set>
@@ -50,8 +51,10 @@
 #include "composer/composer.h"
 #include "composer/query.h"
 #include "composer/table.h"
+#include "config/character_form_manager.h"
 #include "config/config_handler.h"
 #include "converter/attribute.h"
+#include "converter/inner_segment.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/dictionary_mock.h"
@@ -1834,6 +1837,42 @@ TEST_F(DictionaryPredictionAggregatorTest,
 
   EXPECT_EQ(results[0].key, expected[0].correction);
   EXPECT_EQ(results[0].value, "よろしく！");  // default is full width.
+}
+
+TEST_F(DictionaryPredictionAggregatorTest,
+       AggregateTypingCorrectionUpdatesInnerSegmentBoundary) {
+  auto* manager = config::CharacterFormManager::GetCharacterFormManager();
+  manager->SetCharacterForm("0", config::Config::FULL_WIDTH);
+  auto mock = std::make_unique<engine::MockSupplementalModel>();
+  const std::vector<TypeCorrectedQuery> corrected = {
+      TypeCorrectedQuery{"ふつか", TypeCorrectedQuery::CORRECTION}};
+  EXPECT_CALL(*mock, CorrectComposition(_)).WillOnce(Return(corrected));
+  auto data = CreateAggregatorWithMockData(nullptr, std::move(mock));
+  EXPECT_CALL(*data->mutable_realtime_decoder(), Decode(_))
+      .WillOnce([](const ConversionRequest& req) {
+        Result result;
+        result.key = req.key();
+        result.value = "2日";
+        result.attributes = REALTIME;
+        result.inner_segment_boundary = converter::BuildInnerSegmentBoundary(
+            {{result.key.size(), result.value.size(), result.key.size(),
+              result.value.size()}},
+            result.key, result.value);
+        return std::vector<Result>{result};
+      });
+  config_->set_use_typing_correction(true);
+  const std::vector<Result> rewritten = data->aggregator()
+      .AggregateTypingCorrectedResultsForMixedConversion(
+          CreatePredictionConversionRequest("ふつか"));
+  ASSERT_EQ(rewritten.size(), 1);
+  EXPECT_EQ(rewritten[0].value, "２日");
+  EXPECT_EQ(rewritten[0].inner_segment_boundary,
+            converter::BuildInnerSegmentBoundary(
+                {{strlen("ふつか"), strlen("２日"), strlen("ふつか"),
+                  strlen("２日")}},
+                "ふつか", "２日"));
+  manager->SetDefaultRule();
+  manager->ClearHistory();
 }
 
 TEST_F(DictionaryPredictionAggregatorTest,
