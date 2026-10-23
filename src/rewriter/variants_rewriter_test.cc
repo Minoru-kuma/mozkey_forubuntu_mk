@@ -289,6 +289,22 @@ TEST_F(VariantsRewriterTest, SetDescriptionForCandidate) {
               candidate.description);
   }
   {
+    // Calling SetDescriptionForCandidate must rebuild annotation even when
+    // NO_EXTRA_DESCRIPTION is already set on a copied candidate.
+    converter::Candidate candidate;
+    candidate.value = "ＦｕｌｌＡＳＣＩＩ";
+    candidate.content_value = candidate.value;
+    candidate.content_key = "fullascii";
+    candidate.attributes = converter::Attribute::NO_EXTRA_DESCRIPTION;
+    candidate.description = "";
+    VariantsRewriter::SetDescriptionForCandidate(pos_matcher_, &candidate);
+    EXPECT_EQ(absl::StrCat(VariantsRewriter::kFullWidth, " ",
+                           VariantsRewriter::kAlphabet),
+              candidate.description);
+    EXPECT_TRUE(candidate.attributes &
+                converter::Attribute::NO_EXTRA_DESCRIPTION);
+  }
+  {
     converter::Candidate candidate;
     candidate.value = "コギトエルゴスム";
     candidate.content_value = candidate.value;
@@ -461,6 +477,39 @@ TEST_F(VariantsRewriterTest, SetDescriptionForCandidate) {
     VariantsRewriter::SetDescriptionForCandidate(pos_matcher_, &candidate);
     std::string expected = "[全] マイナス";
     EXPECT_EQ(candidate.description, expected);
+  }
+  // Mixed scripts: the width-bearing part of the value determines annotation.
+  {
+    converter::Candidate candidate;
+    candidate.value = "4時";
+    candidate.content_value = candidate.value;
+    candidate.content_key = "よじ";
+    VariantsRewriter::SetDescriptionForCandidate(pos_matcher_, &candidate);
+    EXPECT_EQ(candidate.description, "");
+  }
+  {
+    converter::Candidate candidate;
+    candidate.value = "４時";
+    candidate.content_value = candidate.value;
+    candidate.content_key = "よじ";
+    VariantsRewriter::SetDescriptionForCandidate(pos_matcher_, &candidate);
+    EXPECT_EQ(candidate.description, VariantsRewriter::kFullWidth);
+  }
+  {
+    converter::Candidate candidate;
+    candidate.value = "Tシャツ";
+    candidate.content_value = candidate.value;
+    candidate.content_key = "てぃーしゃつ";
+    VariantsRewriter::SetDescriptionForCandidate(pos_matcher_, &candidate);
+    EXPECT_EQ(candidate.description, "");
+  }
+  {
+    converter::Candidate candidate;
+    candidate.value = "Ｔシャツ";
+    candidate.content_value = candidate.value;
+    candidate.content_key = "てぃーしゃつ";
+    VariantsRewriter::SetDescriptionForCandidate(pos_matcher_, &candidate);
+    EXPECT_EQ(candidate.description, VariantsRewriter::kFullWidth);
   }
 }
 
@@ -1088,6 +1137,157 @@ TEST_F(VariantsRewriterTest,
 
   rewriter->Finish(request, segments);
   EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+}
+
+// Stage 2A: Integrate upstream Finish() learning guards without changing the
+// candidate rewrite pipeline or the Zenz reversible-feedback transaction.
+TEST_F(VariantsRewriterTest, FinishUpstreamStage2A) {
+  std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
+  CharacterFormManager* manager =
+      CharacterFormManager::GetCharacterFormManager();
+
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("いちにさん");
+  seg->set_segment_type(Segment::FIXED_VALUE);
+  converter::Candidate* cand = seg->add_candidate();
+  cand->key = "いちにさん";
+  cand->content_key = cand->key;
+  cand->style = NumberUtil::NumberString::DEFAULT_STYLE;
+  const ConversionRequest default_request;
+
+  // Private requests do not persist even explicit number-style preferences.
+  manager->SetCharacterForm("0", Config::FULL_WIDTH);
+  cand->value = "123";
+  cand->content_value = cand->value;
+  cand->style = NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH;
+  ConversionRequest::Options private_options;
+  private_options.incognito_mode = true;
+  const ConversionRequest private_request =
+      ConversionRequestBuilder().SetOptions(std::move(private_options)).Build();
+  rewriter->Finish(private_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+
+  // A desktop suggestion commit can learn the selected character form.
+  cand->style = NumberUtil::NumberString::DEFAULT_STYLE;
+  const ConversionRequest suggestion_request =
+      ConversionRequestBuilder()
+          .SetRequestType(ConversionRequest::SUGGESTION)
+          .Build();
+  rewriter->Finish(suggestion_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::HALF_WIDTH);
+
+  // Trailing spaces cannot prevent learning the alphabet's selected width.
+  manager->SetCharacterForm("A", Config::FULL_WIDTH);
+  cand->value = "abc ";
+  cand->content_value = cand->value;
+  rewriter->Finish(default_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("A"), Config::HALF_WIDTH);
+
+  // Unselected candidates must not overwrite the committed selection.
+  manager->SetCharacterForm("0", Config::FULL_WIDTH);
+  cand->value = "１２３";
+  cand->content_value = cand->value;
+  converter::Candidate* unselected = seg->add_candidate();
+  unselected->value = "123";
+  unselected->content_value = unselected->value;
+  cand = seg->mutable_candidate(0);
+  rewriter->Finish(default_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+
+  // NO_VARIANTS_EXPANSION normally blocks general form learning.
+  cand->value = "123";
+  cand->content_value = cand->value;
+  cand->attributes = converter::Attribute::NO_VARIANTS_EXPANSION;
+  rewriter->Finish(default_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+
+  // Explicit number styles remain learnable even with NO_VARIANTS_EXPANSION.
+  cand->style = NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_HALFWIDTH;
+  rewriter->Finish(default_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::HALF_WIDTH);
+
+  cand->style = NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_FULLWIDTH;
+  rewriter->Finish(default_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+
+  // General user dictionary results must not update character form choices.
+  cand->style = NumberUtil::NumberString::DEFAULT_STYLE;
+  cand->attributes = converter::Attribute::USER_DICTIONARY;
+  rewriter->Finish(default_request, segments);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"), Config::FULL_WIDTH);
+}
+
+// Stage 2C: upstream mixed-script alternative generation (chunk-based
+// CharacterFormManager), retaining the existing Mozkey realtime safeguards.
+TEST_F(VariantsRewriterTest, RewriteMixedScriptWordTest) {
+  std::unique_ptr<VariantsRewriter> rewriter(CreateVariantsRewriter());
+  CharacterFormManager* manager =
+      CharacterFormManager::GetCharacterFormManager();
+  const ConversionRequest request;
+
+  // Prefer half-width alphabet, full-width katakana.
+  {
+    manager->SetDefaultRule();
+    manager->SetCharacterForm("A", Config::HALF_WIDTH);
+    manager->SetCharacterForm("ア", Config::FULL_WIDTH);
+
+    {
+      Segments segments;
+      Segment* seg = segments.push_back_segment();
+      converter::Candidate* cand = seg->add_candidate();
+      cand->key = "てぃーしゃつ";
+      cand->value = "Tシャツ";
+      cand->content_key = cand->key;
+      cand->content_value = cand->value;
+
+      EXPECT_TRUE(rewriter->Rewrite(request, &segments));
+      ASSERT_EQ(seg->candidates_size(), 2);
+      EXPECT_EQ(seg->candidate(0).value, "Tシャツ");
+      EXPECT_EQ(seg->candidate(0).description, VariantsRewriter::kHalfWidth);
+      EXPECT_EQ(seg->candidate(1).value, "Ｔシャツ");
+      EXPECT_EQ(seg->candidate(1).description, VariantsRewriter::kFullWidth);
+    }
+
+    {
+      Segments segments;
+      Segment* seg = segments.push_back_segment();
+      converter::Candidate* cand = seg->add_candidate();
+      cand->key = "てぃーしゃつ";
+      cand->value = "Ｔシャツ";
+      cand->content_key = cand->key;
+      cand->content_value = cand->value;
+
+      EXPECT_TRUE(rewriter->Rewrite(request, &segments));
+      ASSERT_EQ(seg->candidates_size(), 2);
+      EXPECT_EQ(seg->candidate(0).value, "Tシャツ");
+      EXPECT_EQ(seg->candidate(0).description, VariantsRewriter::kHalfWidth);
+      EXPECT_EQ(seg->candidate(1).value, "Ｔシャツ");
+      EXPECT_EQ(seg->candidate(1).description, VariantsRewriter::kFullWidth);
+    }
+  }
+
+  // Prefer full-width alphabet, full-width katakana.
+  {
+    manager->SetDefaultRule();
+    manager->SetCharacterForm("A", Config::FULL_WIDTH);
+    manager->SetCharacterForm("ア", Config::FULL_WIDTH);
+
+    Segments segments;
+    Segment* seg = segments.push_back_segment();
+    converter::Candidate* cand = seg->add_candidate();
+    cand->key = "てぃーしゃつ";
+    cand->value = "Tシャツ";
+    cand->content_key = cand->key;
+    cand->content_value = cand->value;
+
+    EXPECT_TRUE(rewriter->Rewrite(request, &segments));
+    ASSERT_EQ(seg->candidates_size(), 2);
+    EXPECT_EQ(seg->candidate(0).value, "Ｔシャツ");
+    EXPECT_EQ(seg->candidate(0).description, VariantsRewriter::kFullWidth);
+    EXPECT_EQ(seg->candidate(1).value, "Tシャツ");
+    EXPECT_EQ(seg->candidate(1).description, VariantsRewriter::kHalfWidth);
+  }
 }
 
 TEST_F(VariantsRewriterTest, RewriteTopCandidateForMixedConversionTest) {
