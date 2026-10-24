@@ -34,6 +34,50 @@
 namespace mozc::session {
 namespace {
 
+TEST(ZenzOutputValidatorTest, StrictReadingRejectsPartialSuffix) {
+  const auto result = ZenzOutputValidator::ValidateReadingPreservation(
+      "いっしょにいって", "いっしょにいって", "いって");
+  EXPECT_FALSE(result.accept);
+  EXPECT_EQ(result.reason, "reading_mismatch");
+}
+
+// Regression: the ordinary Mozc surface can itself cover less than the full
+// typed key (e.g. baseline="行って" -> reading="いって").  Even then, strict
+// mode must not accept the same shortened reading from a different Zenz value.
+TEST(ZenzOutputValidatorTest, StrictReadingDoesNotTrustTruncatedMozcBaseline) {
+  const auto result = ZenzOutputValidator::ValidateReadingPreservation(
+      "いっしょにいって", "いっしょにいって", "いって");
+  EXPECT_FALSE(result.accept);
+  EXPECT_EQ(result.reason, "reading_mismatch");
+}
+
+TEST(ZenzOutputValidatorTest, StrictReadingAcceptsCompleteReading) {
+  const auto result = ZenzOutputValidator::ValidateReadingPreservation(
+      "いっしょにいって", "", "いっしょにいって");
+  EXPECT_TRUE(result.accept);
+  EXPECT_EQ(result.reason, "reading_preserved");
+}
+
+TEST(ZenzOutputValidatorTest, StrictReadingAcceptsNormalizedNumericReading) {
+  const auto result = ZenzOutputValidator::ValidateReadingPreservation(
+      "100えんではかえない", "ひゃくえんではかえない", "ひゃくえんではかえない");
+  EXPECT_TRUE(result.accept);
+}
+
+TEST(ZenzOutputValidatorTest, StrictReadingRejectsUnavailableReading) {
+  const auto result = ZenzOutputValidator::ValidateReadingPreservation(
+      "かおもじ", "", "");
+  EXPECT_FALSE(result.accept);
+  EXPECT_EQ(result.reason, "reading_unavailable");
+}
+
+TEST(ZenzOutputValidatorTest, StrictReadingRejectsGeneratedExtraText) {
+  const auto result = ZenzOutputValidator::ValidateReadingPreservation(
+      "かぶ", "かぶ", "かぶしきがいしゃ");
+  EXPECT_FALSE(result.accept);
+  EXPECT_EQ(result.reason, "reading_mismatch");
+}
+
 TEST(ZenzOutputValidatorTest, RestoreUserVisibleSymbolStyleFullwidthBrackets) {
   EXPECT_EQ(ZenzOutputValidator::RestoreUserVisibleSymbolStyle(
                 "これは（てすと）です", "これは（テスト）です",

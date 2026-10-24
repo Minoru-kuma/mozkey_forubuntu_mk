@@ -405,6 +405,11 @@ message Config {
   // corrections. The Mozc history and input-privacy policies still apply.
   optional bool use_zenz_mozc_history_learning = 1043 [default = false];
 
+  // Experimental opt-in: reverse-check the final adopted Zenz surface against
+  // the complete typed reading. OFF by default, including existing profiles.
+  // Additional reverse-conversion work is performed only when enabled.
+  optional bool use_zenz_strict_reading_preservation = 1044 [default = false];
+
   // Exclude short full-sequence readings from automatic Zenz feedback
   // promotion, fast reuse, and rejection. Explicit manual hard blocks
   // remain effective. Recording and Mozc history are not affected.

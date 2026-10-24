@@ -136,6 +136,39 @@ ConversionRequest CreateZenzFeedbackConversionRequest(
 }
 
 TEST(ZenzFeedbackCandidateRewriterTest,
+     StrictReadingDisablesUnvalidatedFeedbackRewriterOnly) {
+  ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
+  ASSERT_TRUE(profile.ok());
+  session::ZenzFeedbackStore store;
+  store.RecordAccepted("かれはてんてきです", "empty", "彼は天敵です");
+  Segments segments;
+  AddSegment("かれはてんてきです", "彼は点滴です", &segments);
+
+  config::Config strict_config;
+  strict_config.set_use_zenz_feedback_reuse(true);
+  strict_config.set_use_zenz_strict_reading_preservation(true);
+  ConversionRequest::Options options = [] {
+    ConversionRequest::Options o;
+    o.request_type = ConversionRequest::CONVERSION;
+    o.enable_user_history_for_conversion = true;
+    o.incognito_mode = false;
+    return o;
+  }();
+  const ConversionRequest strict_request = ConversionRequestBuilder()
+      .SetConfig(strict_config)
+      .SetOptions(std::move(options))
+      .SetRequestType(ConversionRequest::CONVERSION)
+      .SetKey("かれはてんてきです")
+      .Build();
+  ZenzFeedbackCandidateRewriter rewriter;
+  EXPECT_EQ(rewriter.capability(strict_request),
+            RewriterInterface::NOT_AVAILABLE);
+  EXPECT_FALSE(rewriter.Rewrite(strict_request, &segments));
+  EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 1);
+  EXPECT_EQ(segments.conversion_segment(0).candidate(0).value, "彼は点滴です");
+}
+
+TEST(ZenzFeedbackCandidateRewriterTest,
      DoesNotRewriteMultiSegmentConversionEvenWhenFullKeyHasAcceptedFeedback) {
   ScopedUserProfileForZenzFeedbackCandidateRewriterTest profile;
   ASSERT_TRUE(profile.ok());

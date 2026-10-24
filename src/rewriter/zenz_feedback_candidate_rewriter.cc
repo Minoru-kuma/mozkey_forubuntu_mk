@@ -203,6 +203,13 @@ int ZenzFeedbackCandidateRewriter::capability(
     return RewriterInterface::NOT_AVAILABLE;
   }
 
+  // This rewriter has no EngineConverterInterface for reverse conversion.
+  // In strict mode, do not inject or rerank unvalidated saved Zenz feedback.
+  // Other Mozc rewriters, user dictionary, and ordinary history remain active.
+  if (request.config().use_zenz_strict_reading_preservation()) {
+    return RewriterInterface::NOT_AVAILABLE;
+  }
+
   if (request.incognito_mode()) {
     return RewriterInterface::NOT_AVAILABLE;
   }

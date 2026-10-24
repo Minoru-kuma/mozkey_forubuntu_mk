@@ -37,6 +37,14 @@ class ZenzOutputValidator {
  public:
   ZenzValidationResult Validate(const ZenzValidationInput& input) const;
 
+  // Strict opt-in verifier: compare only with the complete typed key and its
+  // normalized reading. A Mozc display candidate is NOT an admissible anchor,
+  // since that candidate might already omit part of the typed reading.
+  // A reverse-conversion failure fails closed only when strict mode is ON.
+  static ZenzValidationResult ValidateReadingPreservation(
+      absl::string_view key, absl::string_view normalized_key_reading,
+      absl::string_view zenz_reading);
+
   // Rejects a strict prefix/suffix of Mozc's complete visible conversion.
   // This cheap guard detects obvious omissions, not arbitrary semantic loss.
   static bool IsObviousSurfaceTruncation(

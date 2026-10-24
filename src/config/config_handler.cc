@@ -267,6 +267,9 @@ void ApplyMozkeyProductDefaults(Config* config) {
   if (!config->has_use_zenz_live_correction()) {
     config->set_use_zenz_live_correction(true);
   }
+  if (!config->has_use_zenz_strict_reading_preservation()) {
+    config->set_use_zenz_strict_reading_preservation(false);
+  }
   if (!config->has_use_zenz_feedback_learning()) {
     config->set_use_zenz_feedback_learning(true);
   }

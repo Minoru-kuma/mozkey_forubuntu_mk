@@ -642,6 +642,23 @@ ZenzContextPrefixDecision ZenzOutputValidator::ResolveLeftContextPrefix(
   return decision;
 }
 
+ZenzValidationResult ZenzOutputValidator::ValidateReadingPreservation(
+    absl::string_view key, absl::string_view normalized_key_reading,
+    absl::string_view zenz_reading) {
+  if (key.empty() || zenz_reading.empty()) {
+    return Reject("reading_unavailable");
+  }
+  if (zenz_reading == key ||
+      (!normalized_key_reading.empty() &&
+       zenz_reading == normalized_key_reading)) {
+    return Accept(false, "reading_preserved");
+  }
+  if (normalized_key_reading.empty()) {
+    return Reject("reading_unavailable");
+  }
+  return Reject("reading_mismatch");
+}
+
 ZenzValidationResult ZenzOutputValidator::Validate(
     const ZenzValidationInput& input) const {
   if (input.key.empty()) {

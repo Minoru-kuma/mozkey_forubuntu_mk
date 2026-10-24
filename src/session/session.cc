@@ -180,6 +180,53 @@ std::string ZenzSafeDebugReason(absl::string_view debug) {
   return std::string(debug);
 }
 
+// Reverse-conversion anchors are cached per Zenz request when multiple
+// feedback candidates are inspected.  Nothing calls this on the OFF path.
+struct ZenzStrictReadingCache {
+  std::optional<std::string> normalized_key_reading;
+};
+
+ZenzValidationResult ValidateZenzStrictReading(
+    EngineConverterInterface* converter, absl::string_view key,
+    absl::string_view candidate_value,
+    ZenzStrictReadingCache* shared_cache = nullptr) {
+  if (candidate_value == key) {
+    return ZenzOutputValidator::ValidateReadingPreservation(key, "", key);
+  }
+
+  std::string candidate_reading;
+  if (converter == nullptr ||
+      !converter->GetReadingText(candidate_value, &candidate_reading)) {
+    return ZenzOutputValidator::ValidateReadingPreservation(key, "", "");
+  }
+  if (candidate_reading == key) {
+    return ZenzOutputValidator::ValidateReadingPreservation(
+        key, "", candidate_reading);
+  }
+
+  ZenzStrictReadingCache local_cache;
+  ZenzStrictReadingCache* cache =
+      shared_cache != nullptr ? shared_cache : &local_cache;
+  if (!cache->normalized_key_reading.has_value()) {
+    std::string reading;
+    if (!converter->GetReadingText(key, &reading)) {
+      reading.clear();
+    }
+    cache->normalized_key_reading = std::move(reading);
+  }
+  if (candidate_reading == *cache->normalized_key_reading &&
+      !candidate_reading.empty()) {
+    return ZenzOutputValidator::ValidateReadingPreservation(
+        key, *cache->normalized_key_reading, candidate_reading);
+  }
+
+  // The Mozc baseline is a safe display fallback, not a reading authority:
+  // it may itself omit part of the typed text.  Accepting its reverse reading
+  // as an independent anchor would defeat the purpose of strict mode.
+  return ZenzOutputValidator::ValidateReadingPreservation(
+      key, *cache->normalized_key_reading, candidate_reading);
+}
+
 // Maximum size of multiple undo stack.
 const size_t kMultipleUndoMaxSize = 10;
 
@@ -6708,6 +6755,7 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
       live_conversion_preedit_.empty() ? live_conversion_key_
                                        : live_conversion_preedit_;
 
+  ZenzStrictReadingCache strict_reading_cache;
   for (const ZenzFeedbackCandidate& feedback_candidate :
        feedback_candidates) {
     const std::string feedback_value =
@@ -6803,6 +6851,18 @@ bool Session::MaybeApplyZenzFeedbackLiveCorrection(
           " accepted_count=", feedback_candidate.accepted_count,
           " rejected_count=", feedback_candidate.rejected_count));
       continue;
+    }
+
+    if (config.use_zenz_strict_reading_preservation()) {
+      const ZenzValidationResult reading_validation = ValidateZenzStrictReading(
+          context_->mutable_converter(), live_conversion_key_,
+          adopted_feedback_value, &strict_reading_cache);
+      if (!reading_validation.accept) {
+        ZenzDebugOutput(absl::StrCat(
+            "[zenz-feedback] fast path rejected reason=",
+            reading_validation.reason));
+        continue;
+      }
     }
 
     ++zenz_live_generation_;
@@ -7666,6 +7726,20 @@ bool Session::ApplyZenzLiveCorrectionResult(
     return OutputCurrentLiveConversionAfterZenzStop(
         command, absl::StrCat("adopted_value_privacy_",
                               adopted_value_privacy.reason));
+  }
+
+  if (config.use_zenz_strict_reading_preservation()) {
+    const ZenzValidationResult reading_validation = ValidateZenzStrictReading(
+        context_->mutable_converter(), pending_zenz_live_.key, zenz_value);
+    if (!reading_validation.accept) {
+      ZenzDebugOutput(absl::StrCat(
+          "[zenz] strict reading rejected reason=", reading_validation.reason,
+          " ", ZenzRedactedTextStats("value", zenz_value),
+          " context_class=", context_class));
+      CancelPendingZenzLiveCorrection();
+      return OutputCurrentLiveConversionAfterZenzStop(
+          command, reading_validation.reason);
+    }
   }
 
   std::string feedback_reason = "feedback_reuse_disabled";

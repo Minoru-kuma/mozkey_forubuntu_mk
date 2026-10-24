@@ -1530,14 +1530,31 @@
                  </widget>
                 </item>
                 <item row="16" column="0" colspan="8">
-                 <widget class="QCheckBox" name="zenzLiveCorrectionCheckBox">
-                  <property name="toolTip">
-                   <string>ライブ変換結果に対して、ローカルの Zenz モデルで文脈補正を行います。</string>
+                 <layout class="QVBoxLayout" name="zenzLiveAndStrictReadingLayout">
+                  <property name="spacing">
+                   <number>4</number>
                   </property>
-                  <property name="text">
-                   <string>Zenz ライブ補正を有効にする</string>
-                  </property>
-                 </widget>
+                  <item>
+                   <widget class="QCheckBox" name="zenzLiveCorrectionCheckBox">
+                    <property name="toolTip">
+                     <string>ライブ変換結果に対して、ローカルの Zenz モデルで文脈補正を行います。</string>
+                    </property>
+                    <property name="text">
+                     <string>Zenz ライブ補正を有効にする</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QCheckBox" name="zenzStrictReadingPreservationCheckBox">
+                    <property name="toolTip">
+                     <string>Zenz の最終候補を逆変換し、入力した読み全体との一致を検証します。読みが一致しない場合や確認できない場合は、通常の Mozc 変換結果に戻します。正しい候補や保存済みフィードバックによる補正が採用されない場合があり、処理時間が増えることがあります。初期値はオフです。</string>
+                    </property>
+                    <property name="text">
+                     <string>厳密な読み保持（実験的）</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
                 </item>
                 <item row="17" column="0" colspan="3">
                  <widget class="QLabel" name="zenzLiveCorrectionDelayLabel">
@@ -3732,6 +3749,7 @@
   <tabstop>liveConversionMinKeyLengthSpinBox</tabstop>
   <tabstop>showLiveConversionRubyWindow</tabstop>
   <tabstop>zenzLiveCorrectionCheckBox</tabstop>
+  <tabstop>zenzStrictReadingPreservationCheckBox</tabstop>
   <tabstop>zenzLiveCorrectionDelaySpinBox</tabstop>
   <tabstop>zenzLiveCorrectionMinKeyLengthSpinBox</tabstop>
   <tabstop>zenzDeferLiveConversionDisplayCheckBox</tabstop>
