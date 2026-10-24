@@ -730,6 +730,81 @@ TEST_F(CharacterFormManagerTest, NumberStyle) {
   }
 }
 
+TEST_F(CharacterFormManagerTest, SynchronizeNumericWidthAndNumberStyle) {
+  CharacterFormManager* manager =
+      CharacterFormManager::GetCharacterFormManager();
+  manager->SetDefaultRule();
+  manager->ClearHistory();
+
+  // Width-only learning must not initialize a nonexistent number style.
+  manager->SetCharacterForm("0", config::Config::HALF_WIDTH);
+  EXPECT_EQ(manager->GetLastNumberStyle(), std::nullopt);
+
+  // A number style commit updates the persisted numeric conversion width.
+  manager->SetLastNumberStyle(
+      {config::Config::FULL_WIDTH,
+       NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH});
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"),
+            config::Config::FULL_WIDTH);
+
+  // Direct width updates change the stored width-dependent style as well.
+  manager->SetCharacterForm("0", config::Config::HALF_WIDTH);
+  {
+    const auto style = manager->GetLastNumberStyle();
+    ASSERT_TRUE(style.has_value());
+    EXPECT_EQ(style->form, config::Config::HALF_WIDTH);
+    EXPECT_EQ(style->style,
+              NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH);
+  }
+  // Mixed script commits use the same storage path.
+  manager->GuessAndSetCharacterForm("３時");
+  {
+    const auto style = manager->GetLastNumberStyle();
+    ASSERT_TRUE(style.has_value());
+    EXPECT_EQ(style->form, config::Config::FULL_WIDTH);
+    EXPECT_EQ(style->style,
+              NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH);
+  }
+
+  // Committing another style synchronizes the character form in the opposite
+  // direction, without changing the explicit style itself.
+  manager->SetLastNumberStyle(
+      {config::Config::HALF_WIDTH,
+       NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_HALFWIDTH});
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"),
+            config::Config::HALF_WIDTH);
+  manager->GuessAndSetCharacterForm("２日");
+  {
+    const auto style = manager->GetLastNumberStyle();
+    ASSERT_TRUE(style.has_value());
+    EXPECT_EQ(style->form, config::Config::FULL_WIDTH);
+    EXPECT_EQ(style->style,
+              NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_FULLWIDTH);
+  }
+
+  // Width-independent styles remain intact when only the width changes.
+  manager->SetLastNumberStyle(
+      {config::Config::HALF_WIDTH, NumberUtil::NumberString::NUMBER_KANJI});
+  manager->GuessAndSetCharacterForm("３時");
+  {
+    const auto style = manager->GetLastNumberStyle();
+    ASSERT_TRUE(style.has_value());
+    EXPECT_EQ(style->form, config::Config::FULL_WIDTH);
+    EXPECT_EQ(style->style, NumberUtil::NumberString::NUMBER_KANJI);
+  }
+  manager->SetLastNumberStyle(
+      {config::Config::HALF_WIDTH, NumberUtil::NumberString::NUMBER_CIRCLED});
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"),
+            config::Config::HALF_WIDTH);
+  manager->SetCharacterForm("0", config::Config::HALF_WIDTH);  // same width
+  {
+    const auto style = manager->GetLastNumberStyle();
+    ASSERT_TRUE(style.has_value());
+    EXPECT_EQ(style->form, config::Config::HALF_WIDTH);
+    EXPECT_EQ(style->style, NumberUtil::NumberString::NUMBER_CIRCLED);
+  }
+}
+
 TEST_F(CharacterFormManagerTest, GuessAndSetCharacterForm) {
   CharacterFormManager* manager =
       CharacterFormManager::GetCharacterFormManager();

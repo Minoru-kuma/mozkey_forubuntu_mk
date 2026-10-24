@@ -67,6 +67,30 @@ constexpr uint32_t kLruSize = 128;           // enough?
 constexpr uint32_t kSeedValue = 0x7fe1fed1;  // random seed value for storage
 constexpr char kFileName[] = "user://cform.db";
 
+class NumberStyleManager;
+
+// Keep the existing on-disk cform.db representation while synchronizing
+// the two numeric preferences in memory, as in upstream c4b2aef7.
+NumberUtil::NumberString::Style AdaptNumberStyleToForm(
+    NumberUtil::NumberString::Style style, Config::CharacterForm form) {
+  DCHECK(form == Config::HALF_WIDTH || form == Config::FULL_WIDTH);
+  switch (style) {
+    case NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH:
+    case NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH:
+      return form == Config::HALF_WIDTH
+                 ? NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH
+                 : NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH;
+    case NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_HALFWIDTH:
+    case NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_FULLWIDTH:
+      return form == Config::HALF_WIDTH
+                 ? NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_HALFWIDTH
+                 : NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_FULLWIDTH;
+    default:
+      // Fixed Kanji, circled, radix, and DEFAULT_STYLE do not encode width.
+      return style;
+  }
+}
+
 class CharacterFormManagerImpl {
  public:
   CharacterFormManagerImpl()
@@ -100,6 +124,10 @@ class CharacterFormManagerImpl {
 
   void set_storage(LruStorage* storage) { storage_ = storage; }
 
+  void set_number_style_manager(NumberStyleManager* manager) {
+    number_style_manager_ = manager;
+  }
+
   void set_require_consistent_conversion(bool val) {
     require_consistent_conversion_ = val;
   }
@@ -124,6 +152,8 @@ class CharacterFormManagerImpl {
                                 std::string* output) const;
 
   LruStorage* storage_;
+  // Only the conversion manager needs this: the preedit form is not learned.
+  NumberStyleManager* number_style_manager_ = nullptr;
 
   // store the setting of a character
   absl::flat_hash_map<char16_t, Config::CharacterForm> conversion_table_;
@@ -219,6 +249,20 @@ class NumberStyleManager {
   }
 
   void set_storage(LruStorage* storage) { storage_ = storage; }
+
+  // Called after an explicit or mixed-script numeric width selection.  Do not
+  // initialize LastNumberStyle merely from a width selection.
+  void SynchronizeNumberForm(Config::CharacterForm form) {
+    const auto current = GetNumberStyle();
+    if (!current.has_value()) {
+      return;
+    }
+    const CharacterFormManager::NumberFormStyle synced = {
+        form, AdaptNumberStyleToForm(current->style, form)};
+    if (current->form != synced.form || current->style != synced.style) {
+      SetNumberStyle(synced);
+    }
+  }
 
  private:
   // Entry should fit value_size (sizeof uint32_t) of the storage.
@@ -486,6 +530,9 @@ void CharacterFormManagerImpl::SaveCharacterFormToStorage(
                               sizeof(ucs2));
   const char* value = storage_->Lookup(key);
   if (value != nullptr && static_cast<Config::CharacterForm>(*value) == form) {
+    if (ucs2 == u'0' && number_style_manager_ != nullptr) {
+      number_style_manager_->SynchronizeNumberForm(form);
+    }
     return;
   }
 
@@ -504,6 +551,9 @@ void CharacterFormManagerImpl::SaveCharacterFormToStorage(
           reinterpret_cast<const char*>(&group_ucs2), sizeof(group_ucs2));
       storage_->Insert(group_key, reinterpret_cast<const char*>(&iform));
     }
+  }
+  if (ucs2 == u'0' && number_style_manager_ != nullptr) {
+    number_style_manager_->SynchronizeNumberForm(form);
   }
   MOZC_VLOG(2) << static_cast<uint16_t>(ucs2) << " is stored to " << kFileName
                << " as " << form;
@@ -724,6 +774,7 @@ CharacterFormManager::Data::Data() {
   preedit_->set_storage(storage_.get());
   conversion_->set_storage(storage_.get());
   number_style_->set_storage(storage_.get());
+  conversion_->set_number_style_manager(number_style_.get());
 }
 
 CharacterFormManager* CharacterFormManager::GetCharacterFormManager() {
@@ -827,6 +878,14 @@ void CharacterFormManager::GuessAndSetCharacterForm(
 
 void CharacterFormManager::SetLastNumberStyle(
     const NumberFormStyle& form_style) {
+  // A numeric style commit also establishes the conversion width of '0'.
+  // The inner update may reconcile the *previous* style; the explicit newly
+  // committed style must be written last.  Conversion rules set to a fixed
+  // width are still respected by CharacterFormManagerImpl::SetCharacterForm.
+  if (form_style.form == Config::HALF_WIDTH ||
+      form_style.form == Config::FULL_WIDTH) {
+    data_->GetConversionManager()->SetCharacterForm("0", form_style.form);
+  }
   data_->GetNumberStyleManager()->SetNumberStyle(form_style);
 }
 
