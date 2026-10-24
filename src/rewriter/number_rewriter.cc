@@ -897,9 +897,16 @@ bool NumberRewriter::RewriteOneSegment(const ConversionRequest& request,
                                  arabic_content_value);
     SetNumberInfoToExistingCandidates(output, pos_matcher_, seg);
 
+    // Phonetic (KANJI_FIRST) candidates must not inherit the previous
+    // Arabic number style: doing so promotes Arabic candidates over Kanji and
+    // marks them NO_VARIANTS_EXPANSION before VariantsRewriter runs.
+    // User dictionary candidates must retain their explicitly chosen form.
+    const bool should_rerank_candidate =
+        should_rerank && info.type == ARABIC_FIRST &&
+        !(info.candidate.attributes & converter::Attribute::USER_DICTIONARY);
     const std::vector<converter::Candidate> number_candidates =
         GenerateCandidatesToInsert(request, info.candidate, output,
-                                   should_rerank);
+                                   should_rerank_candidate);
 
     // If all the candidates are already in the segment, do nothing.
     if (IsAlreadyUpdated(number_candidates, *seg)) {
@@ -1099,13 +1106,30 @@ void NumberRewriter::RememberNumberStyle(
       return;
     }
   }
-  const bool is_half_width =
-      form == Util::HALF_WIDTH ||
-      candidate.style ==
-          NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_HALFWIDTH;
-  CharacterFormManager::NumberFormStyle entry = {
-      is_half_width ? config::Config::HALF_WIDTH : config::Config::FULL_WIDTH,
-      candidate.style};
-  CharacterFormManager::GetCharacterFormManager()->SetLastNumberStyle(entry);
+  auto* manager = CharacterFormManager::GetCharacterFormManager();
+  config::Config::CharacterForm number_form = config::Config::FULL_WIDTH;
+  switch (candidate.style) {
+    case NumberUtil::NumberString::DEFAULT_STYLE:
+      number_form = (form == Util::HALF_WIDTH) ? config::Config::HALF_WIDTH
+                                               : config::Config::FULL_WIDTH;
+      break;
+    case NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_HALFWIDTH:
+    case NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_HALFWIDTH:
+      number_form = config::Config::HALF_WIDTH;
+      break;
+    case NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH:
+    case NumberUtil::NumberString::NUMBER_ARABIC_AND_KANJI_FULLWIDTH:
+      number_form = config::Config::FULL_WIDTH;
+      break;
+    default:
+      // A non-Arabic (Kanji, circled, radix...) style has no numeric surface
+      // width.  Preserve the existing preference instead of forcing FULL.
+      if (manager->GetConversionCharacterForm("0") ==
+          config::Config::HALF_WIDTH) {
+        number_form = config::Config::HALF_WIDTH;
+      }
+      break;
+  }
+  manager->SetLastNumberStyle({number_form, candidate.style});
 }
 }  // namespace mozc

@@ -1165,8 +1165,12 @@ TEST_F(NumberRewriterTest, NumberIsGoogol) {
 }
 
 TEST_F(NumberRewriterTest, RankingForKanjiCandidate) {
-  // If kanji candidate is higher before we rewrite segments,
-  // kanji should have higher raking.
+  // A previous numeric style must not promote Arabic forms for phonetic
+  // KANJI_FIRST inputs such as "さんびゃく".
+  auto* manager = config::CharacterFormManager::GetCharacterFormManager();
+  manager->SetLastNumberStyle(
+      {config::Config::FULL_WIDTH,
+       NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH});
   std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
 
   Segments segments;
@@ -1189,6 +1193,9 @@ TEST_F(NumberRewriterTest, RankingForKanjiCandidate) {
   EXPECT_TRUE(FindCandidateId(segments.segment(0), "三百", &kanji_pos));
   EXPECT_TRUE(FindCandidateId(segments.segment(0), "300", &arabic_pos));
   EXPECT_LT(kanji_pos, arabic_pos);
+  // Do not suppress the subsequent VariantsRewriter width normalization.
+  EXPECT_FALSE(segments.segment(0).candidate(arabic_pos).attributes &
+               converter::Attribute::NO_VARIANTS_EXPANSION);
 }
 
 TEST_F(NumberRewriterTest, ModifyExsistingRanking) {
@@ -1327,6 +1334,11 @@ TEST_F(NumberRewriterTest, SeparatedArabicsTest) {
 // In this case, NumberRewriter should not clear
 // converter::Attribute::USER_DICTIONARY bit in the base candidate.
 TEST_F(NumberRewriterTest, PreserveUserDictionaryAttribute) {
+  // Previously committed full-width number styles must not reorder an
+  // explicit user dictionary entry.
+  config::CharacterFormManager::GetCharacterFormManager()->SetLastNumberStyle(
+      {config::Config::FULL_WIDTH,
+       NumberUtil::NumberString::NUMBER_SEPARATED_ARABIC_FULLWIDTH});
   std::unique_ptr<NumberRewriter> number_rewriter(CreateNumberRewriter());
   {
     Segments segments;
@@ -1346,6 +1358,7 @@ TEST_F(NumberRewriterTest, PreserveUserDictionaryAttribute) {
     }
 
     EXPECT_TRUE(number_rewriter->Rewrite(default_request_, &segments));
+    EXPECT_EQ(segments.segment(0).candidate(0).value, "8823");
     bool base_candidate_found = false;
     {
       const Segment& segment = segments.segment(0);
@@ -2014,6 +2027,35 @@ TEST_F(NumberRewriterTest, RememberNumberStyleForCompoundAndKanjiNumbers) {
   suffix_cand->rid = pos_matcher_.GetNumberId();
   EXPECT_TRUE(rewriter->Rewrite(default_request_, &suffix_segments));
   EXPECT_EQ(suffix_seg->candidate(0).value, "１２３から");
+}
+
+TEST_F(NumberRewriterTest, NonArabicNumberStylePreservesDigitWidth) {
+  std::unique_ptr<NumberRewriter> rewriter(CreateNumberRewriter());
+  auto* manager = config::CharacterFormManager::GetCharacterFormManager();
+  manager->ClearHistory();
+  manager->SetLastNumberStyle(
+      {config::Config::HALF_WIDTH, NumberUtil::NumberString::DEFAULT_STYLE});
+
+  Segments segments;
+  Segment* seg = segments.push_back_segment();
+  seg->set_key("12");
+  seg->set_segment_type(Segment::FIXED_VALUE);
+  converter::Candidate* candidate = seg->add_candidate();
+  candidate->key = "12";
+  candidate->content_key = "12";
+  candidate->value = "十二";
+  candidate->content_value = "十二";
+  candidate->lid = pos_matcher_.GetNumberId();
+  candidate->rid = pos_matcher_.GetNumberId();
+  candidate->style = NumberUtil::NumberString::NUMBER_KANJI;
+  rewriter->Finish(default_request_, segments);
+
+  const auto style = manager->GetLastNumberStyle();
+  ASSERT_TRUE(style.has_value());
+  EXPECT_EQ(style->form, config::Config::HALF_WIDTH);
+  EXPECT_EQ(style->style, NumberUtil::NumberString::NUMBER_KANJI);
+  EXPECT_EQ(manager->GetConversionCharacterForm("0"),
+            config::Config::HALF_WIDTH);
 }
 
 TEST_F(NumberRewriterTest, RerankShortNumbersAfterSeparatedOrArabicKanjiStyle) {
