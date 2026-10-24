@@ -275,6 +275,13 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
       continue;
     }
 
+    // Learned feedback must not bypass the same obvious-omission guard used
+    // for fresh Zenz responses, even if a synthetic candidate already exists.
+    if (session::ZenzOutputValidator::IsObviousSurfaceTruncation(
+            original_top_value, zenz_value)) {
+      continue;
+    }
+
     const session::ZenzOrthographyDecision orthography_decision =
         orthography_policy.Evaluate(original_top_value, zenz_value);
     if (!orthography_decision.allow) {

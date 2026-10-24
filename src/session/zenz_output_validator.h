@@ -25,9 +25,29 @@ struct ZenzValidationResult {
   std::string reason;
 };
 
+// Resolution of a Zenz result that begins with the left-context surface.
+// Ambiguity is a reason to fall back to the already computed Mozc conversion.
+struct ZenzContextPrefixDecision {
+  bool safe = true;
+  bool stripped = false;
+  std::string value;
+};
+
 class ZenzOutputValidator {
  public:
   ZenzValidationResult Validate(const ZenzValidationInput& input) const;
+
+  // Rejects a strict prefix/suffix of Mozc's complete visible conversion.
+  // This cheap guard detects obvious omissions, not arbitrary semantic loss.
+  static bool IsObviousSurfaceTruncation(
+      absl::string_view mozc_value, absl::string_view candidate_value);
+
+  // Never delete the left context merely because it prefixes the output.
+  // A prefix can be stripped only if doing so recovers the exact Mozc baseline.
+  // Other overlapping outputs are ambiguous without a reading-coverage proof.
+  static ZenzContextPrefixDecision ResolveLeftContextPrefix(
+      absl::string_view raw_value, absl::string_view left_context,
+      absl::string_view mozc_value);
 
   // Repairs Zenz output so that sentence-final or expressive punctuation stays
   // under user control. Existing punctuation style is restored first, then

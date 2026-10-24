@@ -634,5 +634,32 @@ TEST(ZenzAdoptionPolicyTest, AllowsUnprojectableJapaneseOnlyRewrite) {
   EXPECT_EQ(result.value, "首都関西");
 }
 
+TEST(ZenzAdoptionPolicyTest, RejectsMissingPhrasePrefixWithoutReverseCost) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "いっしょにいって";
+  input.mozc_value = "一緒に行って";
+  input.zenz_value = "行って";
+  input.baseline_segments = {{"いっしょに", "一緒に"}, {"いって", "行って"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.value, "一緒に行って");
+  EXPECT_EQ(result.reason, "obvious_surface_truncation");
+}
+
+TEST(ZenzAdoptionPolicyTest, RejectsOtherObservedOmission) {
+  ZenzAdoptionPolicy policy;
+  ZenzAdoptionInput input;
+  input.key = "なんとかなる";
+  input.mozc_value = "何とかなる";
+  input.zenz_value = "なる";
+  input.baseline_segments = {{"なんとか", "何とか"}, {"なる", "なる"}};
+
+  const ZenzAdoptionResult result = policy.Decide(input);
+  EXPECT_EQ(result.action, ZenzAdoptionResult::Action::kReject);
+  EXPECT_EQ(result.reason, "obvious_surface_truncation");
+}
+
 }  // namespace
 }  // namespace mozc::session

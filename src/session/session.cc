@@ -7486,16 +7486,23 @@ bool Session::ApplyZenzLiveCorrectionResult(
     return OutputCurrentLiveConversionAfterZenzStop(command, debug);
   }
 
-  std::string zenz_value = response.value;
-
-  // zenz sometimes returns the sanitized left context together with the current
-  // conversion result. The preedit should contain only the current composition
-  // result, so strip the already-known context prefix.
-  if (!pending_zenz_live_.left_context.empty() &&
-      StartsWithString(zenz_value, pending_zenz_live_.left_context)) {
-    zenz_value.erase(0, pending_zenz_live_.left_context.size());
+  // Do not erase a matching left-context prefix blindly: it can be part of
+  // the user's own reading.  Only strip an echo if the entire remainder is
+  // exactly the already-computed Mozc conversion; otherwise fail closed.
+  const ZenzContextPrefixDecision prefix =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          response.value, pending_zenz_live_.left_context,
+          pending_zenz_live_.mozc_value);
+  if (!prefix.safe) {
+    ZenzDebugOutput("[zenz] ambiguous left_context prefix; fallback to Mozc");
+    CancelPendingZenzLiveCorrection();
+    return OutputCurrentLiveConversionAfterZenzStop(
+        command, "ambiguous_left_context_prefix");
+  }
+  std::string zenz_value = prefix.value;
+  if (prefix.stripped) {
     ZenzDebugOutput(absl::StrCat(
-        "[zenz] stripped left_context prefix ",
+        "[zenz] stripped verified left_context prefix ",
         ZenzRedactedTextStats("value", zenz_value),
         " context_class=", pending_zenz_live_.context_class));
   }

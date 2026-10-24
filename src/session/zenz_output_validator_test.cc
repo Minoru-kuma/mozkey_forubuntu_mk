@@ -234,5 +234,80 @@ TEST(ZenzOutputValidatorTest, AllowsShortReadingAbbreviationMatchingContext) {
   EXPECT_EQ(result.reason, "accepted_synthetic");
 }
 
+TEST(ZenzOutputValidatorTest, DetectsObservedOmissionOfJapanesePrefix) {
+  EXPECT_TRUE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "一緒に行って", "行って"));
+  EXPECT_TRUE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "何とかなる", "なる"));
+  EXPECT_TRUE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "なんとかなる", "なる"));
+}
+
+TEST(ZenzOutputValidatorTest, DoesNotRejectOrdinaryOrthographicCorrection) {
+  EXPECT_FALSE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "彼は点滴です", "彼は天敵です"));
+  EXPECT_FALSE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "100円では変えない", "100円では買えない"));
+  EXPECT_FALSE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "行って", "一緒に行って"));
+}
+
+TEST(ZenzOutputValidatorTest, KeepsCompleteValueOnLeftContextOverlap) {
+  const ZenzContextPrefixDecision decision =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          "何とかなる", "何とか", "何とかなる");
+  EXPECT_TRUE(decision.safe);
+  EXPECT_FALSE(decision.stripped);
+  EXPECT_EQ(decision.value, "何とかなる");
+}
+
+TEST(ZenzOutputValidatorTest, RejectsAmbiguousLeftContextPrefix) {
+  const ZenzContextPrefixDecision decision =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          "何とかなる", "何とか", "なんとかなる");
+  EXPECT_FALSE(decision.safe);
+  EXPECT_EQ(decision.value, "何とかなる");
+
+  const ZenzContextPrefixDecision missing =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          "病院に行って", "病院に", "一緒に行って");
+  EXPECT_FALSE(missing.safe);
+}
+
+TEST(ZenzOutputValidatorTest, StripsOnlyExactUnambiguousContextEcho) {
+  const ZenzContextPrefixDecision decision =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          "病院に一緒に行って", "病院に", "一緒に行って");
+  EXPECT_TRUE(decision.safe);
+  EXPECT_TRUE(decision.stripped);
+  EXPECT_EQ(decision.value, "一緒に行って");
+}
+
+TEST(ZenzOutputValidatorTest, KeepsNonEchoOrthographicCorrection) {
+  const ZenzContextPrefixDecision decision =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          "一緒に行って", "病院に", "いっしょにいって");
+  EXPECT_TRUE(decision.safe);
+  EXPECT_FALSE(decision.stripped);
+  EXPECT_EQ(decision.value, "一緒に行って");
+}
+
+TEST(ZenzOutputValidatorTest, RejectsAmbiguousCorrectedPayloadAfterContext) {
+  // The suffix can be an entirely valid correction, but without a reading
+  // correspondence check we cannot prove that the prefix was context echo.
+  const ZenzContextPrefixDecision decision =
+      ZenzOutputValidator::ResolveLeftContextPrefix(
+          "病院に一緒に行って", "病院に", "いっしょにいって");
+  EXPECT_FALSE(decision.safe);
+  EXPECT_FALSE(decision.stripped);
+  EXPECT_EQ(decision.value, "病院に一緒に行って");
+}
+
+TEST(ZenzOutputValidatorTest, BlocksDeletionOfExplicitlyRepeatedInput) {
+  // A normal IME does not silently correct a user's explicitly typed repeat.
+  EXPECT_TRUE(ZenzOutputValidator::IsObviousSurfaceTruncation(
+      "よろしくお願いしますお願いします", "よろしくお願いします"));
+}
+
 }  // namespace
 }  // namespace mozc::session

@@ -610,6 +610,38 @@ bool ZenzOutputValidator::LooksLikeSecret(absl::string_view text) {
          absl::StrContains(text, "apikey");
 }
 
+bool ZenzOutputValidator::IsObviousSurfaceTruncation(
+    absl::string_view mozc_value, absl::string_view candidate_value) {
+  return !mozc_value.empty() && !candidate_value.empty() &&
+         candidate_value.size() < mozc_value.size() &&
+         (absl::StartsWith(mozc_value, candidate_value) ||
+          absl::EndsWith(mozc_value, candidate_value));
+}
+
+ZenzContextPrefixDecision ZenzOutputValidator::ResolveLeftContextPrefix(
+    absl::string_view raw_value, absl::string_view left_context,
+    absl::string_view mozc_value) {
+  ZenzContextPrefixDecision decision;
+  decision.value = std::string(raw_value);
+  if (left_context.empty() || !absl::StartsWith(raw_value, left_context) ||
+      raw_value == mozc_value) {
+    return decision;
+  }
+
+  const absl::string_view stripped = raw_value.substr(left_context.size());
+  if (!stripped.empty() && stripped == mozc_value) {
+    decision.stripped = true;
+    decision.value = std::string(stripped);
+    return decision;
+  }
+
+  // The same surface prefix may be the user's own conversion or a context
+  // echo.  Without reading evidence, neither removing nor retaining it is
+  // safe: return the Mozc fallback instead of presenting a partial phrase.
+  decision.safe = false;
+  return decision;
+}
+
 ZenzValidationResult ZenzOutputValidator::Validate(
     const ZenzValidationInput& input) const {
   if (input.key.empty()) {
