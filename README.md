@@ -144,6 +144,8 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - deferred 表示専用の最大待機時間を設定画面から変更可能。既定は Zenz 補正要求の送信後 250 ms で、期限を超えた generation は破棄して、すでに計算済みの Mozc ライブ変換結果へフォールバック
 - deferred 表示中の Enter / Shift による英字入力では、裏側の Mozc baseline ではなく、その時点でユーザーに見えている presentation を確定。Enter 確定後の Undo でも同じ presentation を復元
 - Zenz 出力が確定済み左文脈の長い suffix を現在入力の先頭へ反復する context echo を検出して拒否し、通常の Mozc ライブ変換結果へフォールバック
+- Zenz の最終候補が通常 Mozc 変換結果の明白な先頭・末尾の欠落になっている場合は、逆変換を使わない軽量な検証で拒否。保存済みフィードバック由来の候補にも適用し、確定済み左文脈の表記と現在の入力が重なる境界が曖昧な場合は、無理に左文脈を削らず通常 Mozc 結果へ戻す
+- 「厳密な読み保持（実験的）」を追加。初期値は OFF で、ON の場合のみ Zenz 最終候補を逆変換して入力した読み全体と照合。読みが一致しない場合や取得できない場合は通常 Mozc 結果へ戻すが、正しい候補や保存済みフィードバックの補正が採用されない場合があり、処理時間も増える可能性がある
 - Zenz の学習機能を「Zenz 学習（Mozc変換履歴）」と「Zenz 学習（補正フィードバック）」に整理し、次の3設定を**独立して** ON/OFF 可能にした。A：Zenz 補正の採用・却下を TSV に記録する、B：保存済み feedback を候補順位・高速再利用・自動ブロックへ利用する、C：明示的に確定した Zenz 補正を Mozc の通常変換履歴へ追加学習する。A=OFF でも B=ON なら既存 feedback を利用でき、A=OFF でも C=ON なら Mozc 履歴へ追加学習できる。旧統合設定からは未設定の新項目だけ値を引き継ぐ
 - 同音異義語が多く文脈によって適切な表記が変わりやすい短い読みで、Zenz feedback の過剰な学習反映を避けるため、保存済み feedback の自動適用を既定では読み全体が 7 文字以上の場合に限定。設定画面から ON/OFF と最小読み文字数（1～20 文字）を変更可能。短い読みの採用・却下履歴は記録・保持し、手動ブロックは引き続き有効
 - シークレットモードでは Zenz のローカル推論を継続したまま Zenz feedback personalization（学習・保存済み feedback の再利用）を無効化。新しい feedback は保存せず、既存 feedback 自体は削除しない
@@ -310,6 +312,16 @@ Zenz 補正は設定可能なデバウンス時間の後に実行されます。
 deferred 表示で Zenz の応答を待っている間に Space を押した場合は、候補を次へ進めず、まずその時点の Mozc 通常変換結果を表示します。Enter はその瞬間に見えている presentation をそのまま確定し、Undo では同じ presentation を未確定状態として復元します。Shift による英字入力へ移る場合も、表示中の presentation を先に確定してから英字入力を開始します。Backspace では削除後の Mozc 結果を即時に反映し、そのキー操作だけで新しい Zenz 補正を直ちに走らせず、続く実テキスト入力から通常の deferred Zenz scheduling を再開します。
 
 Zenz 出力は表示前に検証されます。空出力、短すぎる入力、Mozc 結果と同一の出力、長すぎる出力、不正な文字列、安全でない可能性のある文字列は拒否されます。さらに、確定済み左文脈の長い末尾部分を Zenz 出力の先頭へ繰り返す context echo についても、現在の読み・Mozc 結果から見て不自然に長い反復だけを検出して拒否します。短い一致や、現在の読みそのものが同じ語句の反復を要求している場合は一律には拒否しません。拒否された場合は、その時点の通常 Mozc ライブ変換結果へフォールバックします。
+
+#### Zenz の明白な欠落防止と厳密な読み保持（実験的）
+
+通常設定では、Zenz の最終候補が通常 Mozc 変換結果の明白な先頭・末尾の欠落になっている場合、候補を拒否して通常 Mozc 結果へ戻します。この軽量な検証は、Zenz の新しい応答だけでなく保存済みフィードバック由来の候補にも適用します。確定済み左文脈の末尾と今回の入力が表記上重なる場合も、左文脈の反復なのか入力自体の一部なのか安全に区別できなければ、先頭を機械的に削らず通常 Mozc 結果へ戻します。
+
+これは**表記から判断できる明白な欠落を減らす保護**であり、ユーザーが入力した読み全体の保持を保証するものではありません。通常時に追加の逆変換は行いません。
+
+設定画面の **「厳密な読み保持（実験的）」** を ON にすると、採用直前の Zenz 候補を Mozc で逆変換し、その読みが入力した読み全体または正規化した入力の読みと一致するか確認します。読みが一致しない場合や読みを取得できない場合は、通常 Mozc 変換結果を使用します。**初期値は OFF** で、明示的に保存した ON 設定は維持します。
+
+厳密モードは保守的な検証です。漢字の複数の読みや逆変換の限界により、正しい候補でも拒否される場合があります。また、読みを検証できない保存済みフィードバックによる通常候補の順位調整・候補追加などは制限され、追加の逆変換処理によって応答が遅くなる可能性があります。通常の Zenz 補正やフィードバック活用を優先する場合は、既定の OFF のまま利用してください。
 
 通常 Mozc ライブ変換で現在の結果として現れているユーザー辞書由来候補や ASCII / mixed-script 表記は、Zenz 採用時に保護されます。ASCII / mixed-script 表記は、読みを安全に特定できる場合に Zenz prompt 内で一時 placeholder 化し、Zenz 応答後に元の表記へ復元します。これにより、`もずきー -> Mozkey` のような表記が `モズキー` のように上書きされることを避けつつ、対象語の前後にある文の補正は採用できるようにしています。
 
@@ -1051,6 +1063,8 @@ Main features added in this fork
 - Adds a configurable deferred-presentation wait limit. The default is 250 ms after the Zenz correction request is submitted; when the deadline expires, that generation is discarded and Mozkey reveals the already-computed normal Mozc live-conversion result
 - Commits the presentation that is actually visible to the user, rather than a hidden Mozc baseline, when Enter or Shift-based ASCII input ends a deferred presentation; Undo after Enter restores the same visible presentation
 - Detects and rejects likely context echo where Zenz repeats a long suffix of already committed left context at the beginning of the current output, then falls back to the normal Mozc live-conversion result
+- Applies lightweight omission guards to fresh Zenz responses and stored-feedback candidates, rejecting obvious leading/trailing truncation relative to the normal Mozc result. Ambiguous overlaps with committed left context fall back to Mozc rather than blindly stripping a matching prefix
+- Adds **Strict Reading Preservation (Experimental)** as an opt-in setting, **OFF by default**. When enabled, the final Zenz candidate undergoes reverse-reading verification against the complete typed reading; mismatch or unavailable reading falls back to Mozc. Valid candidates and saved-feedback corrections can be rejected, and additional processing may increase latency
 - Separates Zenz personalization into three independent settings: **A** records Zenz accept/reject observations to a local TSV; **B** automatically reuses existing feedback for candidate ranking, fast-path correction, and statistical auto-blocking; **C** learns explicitly committed Zenz corrections into regular Mozc conversion history. Recording can be disabled without disabling reuse or Mozc-history learning, and pre-existing legacy preferences are inherited only for new settings that have not yet been explicitly saved
 - Limits automatic reuse of stored Zenz feedback to full readings of at least 7 Unicode code points by default, to avoid over-applying learned preferences to short readings with many homophones and context-dependent interpretations. The threshold (1–20) and the gate can be configured; shorter readings are still recorded, and explicit manual hard blocks still apply
 - In Secret / Incognito mode, keeps local Zenz inference enabled while disabling Zenz feedback personalization; stored feedback is not reused or consulted for decisions, no new feedback is persisted, and existing feedback is left intact
@@ -1212,6 +1226,33 @@ relative to the current reading/Mozc result. Short overlaps are not rejected
 unconditionally, and legitimate repetition supported by the current reading is
 still allowed. If validation fails, Mozkey falls back to the current normal
 Mozc live-conversion result.
+
+#### Obvious Zenz omission guards and strict reading preservation (experimental)
+
+In the default configuration, lightweight checks reject a final Zenz candidate
+when it is an obvious leading or trailing truncation of the normal Mozc
+conversion result. This applies to both fresh Zenz responses and candidates
+reused from saved feedback. When a surface prefix overlaps with already
+committed left context and it is unclear whether it belongs to the new input,
+Mozkey does not blindly strip that prefix; it falls back to the complete normal
+Mozc result instead.
+
+These checks reduce **obvious surface omissions**; they do **not** guarantee
+preservation of the user's entire typed reading. The default path does not
+perform extra reverse conversion for this protection.
+
+The optional **Strict Reading Preservation (Experimental)** setting reverse-
+converts the final adopted Zenz candidate and checks whether its reading
+matches the complete typed reading or a normalized form of that reading.
+When the reading differs or cannot be obtained, Mozkey falls back to its normal
+conversion result. This setting is **OFF by default**; explicitly saved ON
+preferences are preserved.
+
+Strict mode is intentionally conservative. Alternate kanji readings or reverse-
+conversion limitations can reject otherwise valid candidates. Normal-candidate
+reranking or insertion based on saved feedback that cannot be verified is also
+restricted, and the additional reverse conversion may increase latency.
+Leave strict mode OFF to retain the usual Zenz correction and feedback behavior.
 
 User-dictionary candidates and ASCII / mixed-script surfaces that appear in the
 current normal Mozc live-conversion result are protected before Zenz output is
