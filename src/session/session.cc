@@ -2413,8 +2413,8 @@ bool Session::ExecuteCommandSequenceWithInitialOutput(
       command_sequence_waits_for_reconversion_ = true;
       pending_command_sequence_key_.clear();
       ++command_sequence_generation_;
-      // The client still decides whether a selection is present. In the
-      // unselected case the original half-width Space must pass through.
+      // The client still decides whether a selection is present. If not,
+      // it applies the already-generated fallback Space result.
       final_output.set_consumed(consumed);
       *command->mutable_output() = final_output;
       return true;
@@ -3563,10 +3563,15 @@ bool Session::RequestReconvertSelectionOrInsertSpace(
     return DoNothing(command);
   }
 
-  // Build the normal InsertSpace output first.  The TSF client will apply this
-  // output only when the application has no selected text.  When selected text
-  // exists, the callback is handled before the fallback output is applied.
-  if (!InsertSpace(command)) {
+  // The TSF client applies this output only when reconversion is unavailable.
+  // A half-width fallback must be committed by Mozkey: once OnTestKey reserves
+  // the physical Space, some clients will not deliver a pass-through key.
+  // Normal InsertSpaceHalfWidth behavior remains unchanged elsewhere.
+  const bool inserted =
+      IsFullWidthInsertSpace(command->input())
+          ? InsertSpaceFullWidth(command)
+          : InsertSpaceHalfWidth(command, /*allow_pass_through=*/false);
+  if (!inserted) {
     return false;
   }
 
@@ -8758,7 +8763,8 @@ bool Session::InsertSpaceToggled(commands::Command* command) {
   }
 }
 
-bool Session::InsertSpaceHalfWidth(commands::Command* command) {
+bool Session::InsertSpaceHalfWidth(commands::Command* command,
+                                   bool allow_pass_through) {
   if (!(context_->state() &
         (ImeContext::PRECOMPOSITION | ImeContext::COMPOSITION |
          ImeContext::CONVERSION))) {
@@ -8768,7 +8774,7 @@ bool Session::InsertSpaceHalfWidth(commands::Command* command) {
   if (context_->state() == ImeContext::PRECOMPOSITION) {
     // TODO(komatsu): This is a hack to work around the problem with
     // the inconsistency between TestSendKey and SendKey.
-    if (IsPureSpaceKey(command->input().key())) {
+    if (allow_pass_through && IsPureSpaceKey(command->input().key())) {
       return EchoBackAndClearUndoContext(command);
     }
     // UndoContext will be cleared in |InsertCharacter| in this case.

@@ -16880,7 +16880,7 @@ TEST_F(SessionTest, InsertSpaceWithCustomKeyBinding) {
 }
 
 TEST_F(SessionTest,
-       ReconvertSelectionOrInsertSpaceKeepsHalfWidthPassThroughFallback) {
+       ReconvertSelectionOrInsertSpaceCommitsHalfWidthFallback) {
   config::Config config;
   constexpr absl::string_view kCustomKeymapTable =
       "status\tkey\tcommand\n"
@@ -16907,12 +16907,11 @@ TEST_F(SessionTest,
   EXPECT_FALSE(command.output().has_result());
   EXPECT_FALSE(command.output().has_callback());
 
-  // SendKey deliberately keeps the normal half-width Space fallback as a
-  // pass-through.  The TSF client consumes the physical key only if its
-  // reconversion callback actually handles selected application text.
+  // The physical key is reserved by TestSendKey, so the fallback must carry
+  // an explicit half-width space result instead of relying on pass-through.
   EXPECT_TRUE(SendKey("Space", &session, &command));
-  EXPECT_FALSE(command.output().consumed());
-  EXPECT_FALSE(command.output().has_result());
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT(" ", command);
   ASSERT_TRUE(command.output().has_callback());
   ASSERT_TRUE(command.output().callback().has_session_command());
   EXPECT_EQ(command.output().callback().session_command().type(),
@@ -16920,7 +16919,7 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest,
-       ReconvertSequenceKeepsHalfWidthSpaceFallbackUnconsumed) {
+       ReconvertSequenceCommitsHalfWidthSpaceFallback) {
   config::Config config;
   config.set_session_keymap(config::Config::CUSTOM);
   config.set_custom_keymap_table(
@@ -16941,15 +16940,44 @@ TEST_F(SessionTest,
   EXPECT_TRUE(TestSendKey("Space", &session, &command));
   EXPECT_TRUE(command.output().consumed());
 
-  // If no text is selected, TSF applies the fallback; delaying the later
-  // Zenz step must not swallow the original half-width Space.
+  // If no text is selected, TSF applies the explicitly committed fallback;
+  // delaying the later Zenz step must not swallow the half-width space.
   EXPECT_TRUE(SendKey("Space", &session, &command));
-  EXPECT_FALSE(command.output().consumed());
-  EXPECT_FALSE(command.output().has_result());
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT(" ", command);
   ASSERT_TRUE(command.output().has_callback());
   EXPECT_EQ(command.output().callback().session_command().type(),
             commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE);
   EXPECT_FALSE(command.output().has_command_sequence_resume_generation());
+}
+
+TEST_F(SessionTest, ReconvertSelectionOrInsertSpaceCommitsFullWidthFallback) {
+  config::Config config;
+  constexpr absl::string_view kCustomKeymapTable =
+      "status\tkey\tcommand\n"
+      "Precomposition\tSpace\tReconvertSelectionOrInsertSpace\n";
+  config.set_session_keymap(config::Config::CUSTOM);
+  config.set_custom_keymap_table(kCustomKeymapTable);
+  config.set_space_character_form(config::Config::FUNDAMENTAL_FULL_WIDTH);
+
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  InitSessionToPrecomposition(&session);
+
+  commands::Command command;
+  EXPECT_TRUE(TestSendKey("Space", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_FALSE(command.output().has_result());
+  EXPECT_TRUE(SendKey("Space", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
+  EXPECT_RESULT("　", command);
+  ASSERT_TRUE(command.output().has_callback());
+  ASSERT_TRUE(command.output().callback().has_session_command());
+  EXPECT_EQ(command.output().callback().session_command().type(),
+            commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE);
 }
 
 TEST_F(SessionTest, DelaySequencePreservesPhysicalSpacePassThrough) {
@@ -19468,8 +19496,10 @@ TEST_F(SessionTest, Issue2223823) {
 }
 
 TEST_F(SessionTest, Issue2223762) {
-  // This is a unittest against http://b/2223762.
-  // - The first space in half-width alphanumeric mode is full-width.
+  // The default Windows keymap sends Space through
+  // ReconvertSelectionOrInsertSpace. Because TestSendKey reserves the physical
+  // key for selection inspection, a half-width ASCII-mode fallback must
+  // explicitly commit one ASCII space instead of passing the key through.
 
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
@@ -19481,10 +19511,13 @@ TEST_F(SessionTest, Issue2223762) {
   EXPECT_TRUE(session.CompositionModeHalfASCII(&command));
   EXPECT_EQ(command.output().mode(), commands::HALF_ASCII);
 
+  EXPECT_TRUE(TestSendKey("Space", &session, &command));
+  EXPECT_TRUE(command.output().consumed());
   EXPECT_TRUE(SendKey("Space", &session, &command));
-  EXPECT_FALSE(command.output().consumed());
+  EXPECT_TRUE(command.output().consumed());
   EXPECT_FALSE(command.output().has_preedit());
-  EXPECT_FALSE(command.output().has_result());
+  EXPECT_RESULT(" ", command);
+  EXPECT_EQ(command.output().mode(), commands::HALF_ASCII);
 }
 
 TEST_F(SessionTest, Issue2223755) {

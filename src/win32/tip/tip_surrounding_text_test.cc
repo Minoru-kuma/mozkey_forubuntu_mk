@@ -48,6 +48,33 @@ TEST(TipSurroundingTextInfoTest, DefaultsToNoLegacyImm32Fallback) {
   EXPECT_FALSE(info.used_legacy_imm32_fallback);
 }
 
+TEST(TipSurroundingTextUtilTest, ExplicitSelectionNeedsTsfProvenance) {
+  TipSurroundingTextInfo info;
+  EXPECT_FALSE(TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+      info));
+
+  // A text string without a verified TSF selection is not sufficient.
+  info.selected_text = L"x";
+  EXPECT_FALSE(TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+      info));
+
+  info.has_selected_text = true;
+  EXPECT_TRUE(TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+      info));
+
+  info.selected_text = L"xyz";
+  EXPECT_TRUE(TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+      info));
+
+  // IMM32 may return an adjacent one-character target with no selection.
+  info.used_legacy_imm32_fallback = true;
+  EXPECT_FALSE(TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+      info));
+  info.selected_text = L"x";
+  EXPECT_FALSE(TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+      info));
+}
+
 TEST(TipSurroundingTextUtilTest, ContainsEmbeddedObject) {
   EXPECT_FALSE(TipSurroundingTextUtil::ContainsEmbeddedObject(L""));
   EXPECT_FALSE(TipSurroundingTextUtil::ContainsEmbeddedObject(L"abc"));
