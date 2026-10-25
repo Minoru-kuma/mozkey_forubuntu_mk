@@ -203,6 +203,13 @@ int ZenzFeedbackCandidateRewriter::capability(
     return RewriterInterface::NOT_AVAILABLE;
   }
 
+  // This rewriter has no EngineConverterInterface for reverse conversion.
+  // In strict mode, do not inject or rerank unvalidated saved Zenz feedback.
+  // Other Mozc rewriters, user dictionary, and ordinary history remain active.
+  if (request.config().use_zenz_strict_reading_preservation()) {
+    return RewriterInterface::NOT_AVAILABLE;
+  }
+
   if (request.incognito_mode()) {
     return RewriterInterface::NOT_AVAILABLE;
   }
@@ -272,6 +279,13 @@ bool ZenzFeedbackCandidateRewriter::Rewrite(
     }
 
     if (zenz_value == original_top_value) {
+      continue;
+    }
+
+    // Learned feedback must not bypass the same obvious-omission guard used
+    // for fresh Zenz responses, even if a synthetic candidate already exists.
+    if (session::ZenzOutputValidator::IsObviousSurfaceTruncation(
+            original_top_value, zenz_value)) {
       continue;
     }
 

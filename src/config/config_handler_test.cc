@@ -90,6 +90,7 @@ void SetMozkeyProductDefaultsForTesting(Config* config) {
   config->set_use_zenz_feedback_recording(true);
   config->set_use_zenz_feedback_reuse(true);
   config->set_use_zenz_mozc_history_learning(true);
+  config->set_use_zenz_strict_reading_preservation(false);
   config->set_use_zenz_feedback_min_key_length(true);
   config->set_zenz_feedback_min_key_length(7);
   config->set_use_zenz_auto_block_rejected_correction(true);
@@ -115,6 +116,7 @@ void ExpectMozkeyProductDefaults(const Config& config) {
   EXPECT_EQ(config.direct_commit_key(), kExpectedMozkeyDirectCommitKey);
 
   EXPECT_TRUE(config.use_zenz_live_correction());
+  EXPECT_FALSE(config.use_zenz_strict_reading_preservation());
   EXPECT_FALSE(config.defer_live_conversion_display_until_zenz_result());
   EXPECT_EQ(config.zenz_live_correction_delay_msec(), 700);
   EXPECT_EQ(config.zenz_deferred_presentation_timeout_msec(), 250);
@@ -715,6 +717,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   input.set_use_direct_commit(false);
   input.set_direct_commit_key(0);
   input.set_use_zenz_live_correction(false);
+  input.set_use_zenz_strict_reading_preservation(true);
   input.set_use_zenz_feedback_learning(false);
   input.set_use_zenz_feedback_recording(false);
   input.set_use_zenz_feedback_reuse(true);
@@ -743,6 +746,7 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_FALSE(output.use_direct_commit());
   EXPECT_EQ(output.direct_commit_key(), 0);
   EXPECT_FALSE(output.use_zenz_live_correction());
+  EXPECT_TRUE(output.use_zenz_strict_reading_preservation());
   EXPECT_FALSE(output.use_zenz_feedback_learning());
   EXPECT_FALSE(output.use_zenz_feedback_recording());
   EXPECT_TRUE(output.use_zenz_feedback_reuse());
@@ -760,6 +764,33 @@ TEST_F(ConfigHandlerTest, MozkeyProductDefaultsPreserveExplicitSettings) {
   EXPECT_FALSE(output.use_custom_preedit_target_underline_color());
   EXPECT_EQ(output.preedit_target_underline_color(), 0x445566);
 #endif  // _WIN32
+}
+
+// Strict reading is opt-in. Missing fields must remain OFF, while an explicit
+// ON preference must survive persistence and reload.
+TEST_F(ConfigHandlerTest, StrictReadingDefaultOffPreservesExplicitOn) {
+  TempDirectory temp_dir = testing::MakeTempDirectoryOrDie();
+  const std::string config_file =
+      FileUtil::JoinPath(temp_dir.path(), "strict_reading_default.db");
+  ASSERT_OK(FileUtil::UnlinkIfExists(config_file));
+  ConfigHandler::SetConfigFileNameForTesting(config_file);
+  ConfigHandler::Reload();
+
+  Config fresh;
+  EXPECT_FALSE(fresh.use_zenz_strict_reading_preservation());
+  EXPECT_FALSE(fresh.has_use_zenz_strict_reading_preservation());
+  EXPECT_FALSE(
+      ConfigHandler::GetCopiedConfig().use_zenz_strict_reading_preservation());
+
+  Config explicit_on;
+  explicit_on.set_use_zenz_strict_reading_preservation(true);
+  ConfigHandler::SetConfig(explicit_on);
+  EXPECT_TRUE(
+      ConfigHandler::GetCopiedConfig().use_zenz_strict_reading_preservation());
+  ConfigHandler::Reload();
+  const Config persisted = ConfigHandler::GetCopiedConfig();
+  EXPECT_TRUE(persisted.has_use_zenz_strict_reading_preservation());
+  EXPECT_TRUE(persisted.use_zenz_strict_reading_preservation());
 }
 
 // A legacy on-disk config may contain only field 1011. Normalization must

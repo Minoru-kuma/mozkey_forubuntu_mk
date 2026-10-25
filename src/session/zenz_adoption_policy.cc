@@ -39,6 +39,7 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_replace.h"
+#include "session/zenz_output_validator.h"
 
 namespace mozc::session {
 namespace {
@@ -835,6 +836,18 @@ ZenzAdoptionResult ZenzAdoptionPolicy::Decide(
                           : "orthographic_transition_stale_baseline_segments";
       return result;
     }
+  }
+
+  // Reject a clear deletion from the full Mozc surface even when Japanese-
+  // only rewrites pass the orthography checks.  Check the final repaired value
+  // so that repair cannot accidentally reintroduce a truncated phrase.
+  if (ZenzOutputValidator::IsObviousSurfaceTruncation(input.mozc_value,
+                                                     adopted_value)) {
+    ZenzAdoptionResult result;
+    result.action = ZenzAdoptionResult::Action::kReject;
+    result.value = std::string(input.mozc_value);
+    result.reason = "obvious_surface_truncation";
+    return result;
   }
 
   ZenzAdoptionResult result;

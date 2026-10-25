@@ -3574,6 +3574,8 @@ void ConfigDialog::ConvertFromProto(const config::Config &config) {
                show_live_conversion_ruby_window);
 
   SET_CHECKBOX(zenzLiveCorrectionCheckBox, use_zenz_live_correction);
+  SET_CHECKBOX(zenzStrictReadingPreservationCheckBox,
+               use_zenz_strict_reading_preservation);
   SET_CHECKBOX(zenzDeferLiveConversionDisplayCheckBox,
                defer_live_conversion_display_until_zenz_result);
 
@@ -3940,6 +3942,8 @@ void ConfigDialog::ConvertToProto(config::Config *config) const {
                show_live_conversion_ruby_window);
 
   GET_CHECKBOX(zenzLiveCorrectionCheckBox, use_zenz_live_correction);
+  GET_CHECKBOX(zenzStrictReadingPreservationCheckBox,
+               use_zenz_strict_reading_preservation);
   GET_CHECKBOX(zenzDeferLiveConversionDisplayCheckBox,
                defer_live_conversion_display_until_zenz_result);
   config->set_zenz_live_correction_delay_msec(
