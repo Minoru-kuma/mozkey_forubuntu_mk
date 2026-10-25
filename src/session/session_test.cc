@@ -7633,6 +7633,7 @@ TEST_F(SessionTest, StrictReadingOnAcceptsCompleteReading) {
 }
 
 TEST_F(SessionTest, StrictReadingOnRejectsTruncatedMultiSegmentFeedback) {
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
   ScopedUserProfileForZenzFeedbackSessionTest profile;
@@ -7672,9 +7673,13 @@ TEST_F(SessionTest, StrictReadingOnRejectsTruncatedMultiSegmentFeedback) {
   commands::Command command;
   EXPECT_FALSE(peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
   EXPECT_TRUE(peer.zenz_live_value_().empty());
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
 }
 
 TEST_F(SessionTest, StrictReadingOnAcceptsCompleteMultiSegmentFeedback) {
+#if defined(_WIN32) || defined(__APPLE__)
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
   ScopedUserProfileForZenzFeedbackSessionTest profile;
@@ -7714,6 +7719,9 @@ TEST_F(SessionTest, StrictReadingOnAcceptsCompleteMultiSegmentFeedback) {
   ASSERT_TRUE(peer.MaybeApplyZenzFeedbackLiveCorrection(&command));
   EXPECT_TRUE(command.output().zenz_live_correction_applied());
   EXPECT_EQ(peer.zenz_live_value_(), "彼は天敵です");
+#else
+  GTEST_SKIP() << "Zenz feedback store persists only on Windows/macOS.";
+#endif
 }
 
 TEST_F(SessionTest, DeferredZenzAcceptedResultReplacesVisiblePreeditOnce) {
