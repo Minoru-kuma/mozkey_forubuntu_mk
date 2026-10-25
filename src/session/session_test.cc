@@ -19496,15 +19496,17 @@ TEST_F(SessionTest, Issue2223823) {
 }
 
 TEST_F(SessionTest, Issue2223762) {
-  // The default Windows keymap sends Space through
-  // ReconvertSelectionOrInsertSpace. Because TestSendKey reserves the physical
-  // key for selection inspection, a half-width ASCII-mode fallback must
-  // explicitly commit one ASCII space instead of passing the key through.
+  // This tests the Windows MS-IME Space binding on all platforms.
+  // KOTOERI uses InsertSpace instead of ReconvertSelectionOrInsertSpace.
+  config::Config config;
+  config.set_session_keymap(config::Config::MSIME);
 
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
   Session session(engine);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
   InitSessionToPrecomposition(&session);
   commands::Command command;
 

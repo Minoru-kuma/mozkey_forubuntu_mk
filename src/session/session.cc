@@ -2181,10 +2181,9 @@ bool Session::TestSendKey(commands::Command* command) {
         }
         return DoNothing(command);
       case keymap::PrecompositionState::RECONVERT_SELECTION_OR_INSERT_SPACE:
-        // TestSendKey must route this command to the client even when the
-        // fallback space is half-width.  SendKey still keeps the normal
-        // InsertSpace pass-through semantics so an unselected half-width Space
-        // can ultimately be forwarded to the application.
+        // TestSendKey reserves Space so the TSF client can inspect selection.
+        // SendKey then prepares an explicit Space fallback that the client
+        // applies only when reconversion is unavailable.
         return DoNothing(command);
       case keymap::PrecompositionState::INSERT_ALTERNATE_SPACE:
         if (IsFullWidthInsertSpace(command->input()) && IsPureSpaceKey(key)) {
