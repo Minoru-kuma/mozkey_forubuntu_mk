@@ -457,10 +457,10 @@ ReconvertSelectionResult ReconvertSelectionOrKeepFallbackOutput(
   }
 
   TipSurroundingTextInfo info;
-  bool need_async_edit_session = false;
-  if (!TipSurroundingText::PrepareForReconversionFromIme(
-          text_service, context, &info, &need_async_edit_session)) {
-    // Some TSF clients do not expose enough surrounding text for reconversion.
+  if (!TipSurroundingText::PrepareForExplicitSelectionReconversionFromIme(
+          text_service, context, &info)) {
+    // Space must not confuse a legacy IMM32 reconversion target with a
+    // verified selection. Full TSF is unavailable: insert Space instead.
     // In that case, reconversion is unavailable, so keep the server-generated
     // fallback InsertSpace output instead of consuming Space and doing nothing.
     fallback_output->clear_callback();
@@ -474,8 +474,8 @@ ReconvertSelectionResult ReconvertSelectionOrKeepFallbackOutput(
   }
 
   const std::string text_utf8 = WideToUtf8(info.selected_text);
-  if (text_utf8.empty()) {
-    // No selected application text.  Keep and apply the fallback InsertSpace
+  if (!TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(info)) {
+    // No verified selected application text. Keep the fallback InsertSpace
     // output that the server already generated.
     fallback_output->clear_callback();
     return ReconvertSelectionResult::kUseFallback;
@@ -512,13 +512,9 @@ ReconvertSelectionResult ReconvertSelectionOrKeepFallbackOutput(
 
   // The Output carries a continuation token only when the server has a
   // suspended keymap macro. SyncEditSessionImpl posts its acknowledgement
-  // after applying that Output, including when the edit session is async.
-  const bool applied =
-      need_async_edit_session
-          ? TipEditSession::OnOutputReceivedAsync(text_service, context,
-                                                  std::move(output))
-          : TipEditSession::OnOutputReceivedSync(text_service, context,
-                                                 std::move(output));
+  // after applying that Output. The explicit-selection path is TSF-only.
+  const bool applied = TipEditSession::OnOutputReceivedSync(
+      text_service, context, std::move(output));
   return applied ? ReconvertSelectionResult::kHandledSuccessfully
                  : ReconvertSelectionResult::kHandledWithError;
 }

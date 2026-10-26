@@ -713,10 +713,10 @@ HRESULT OnKey(TipTextService* text_service, ITfContext* context,
   // TSF spec guarantees that key event handling can always be a synchronous
   // operation.
   //
-  // A half-width fallback intentionally has should_be_eaten=false so an
-  // unselected Space can pass through to the application.  If the
-  // RECONVERT_SELECTION_OR_INSERT_SPACE callback actually handles selected
-  // application text, however, that same physical Space must be consumed.
+  // Ordinary key pass-through uses should_be_eaten=false. For
+  // RECONVERT_SELECTION_OR_INSERT_SPACE, the server supplies an explicit
+  // fallback Space result when nothing is selected. If reconversion handles
+  // selected text, the callback also requires the physical key to be eaten.
   bool callback_consumed_key_event = false;
   TipEditSession::OnOutputReceivedSync(text_service, context, temporal_output,
                                        &callback_consumed_key_event);

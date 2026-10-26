@@ -167,7 +167,8 @@ class Session {
 
   bool InsertSpace(mozc::commands::Command* command);
   bool InsertSpaceToggled(mozc::commands::Command* command);
-  bool InsertSpaceHalfWidth(mozc::commands::Command* command);
+  bool InsertSpaceHalfWidth(mozc::commands::Command* command,
+                            bool allow_pass_through = true);
   bool InsertSpaceFullWidth(mozc::commands::Command* command);
   bool InsertCharacter(mozc::commands::Command* command);
   bool UpdateComposition(mozc::commands::Command* command);
