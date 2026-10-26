@@ -69,6 +69,10 @@ struct ConversionPreferences {
   // Skip only Zenz feedback reuse on this conversion request. Ordinary
   // Mozc user history and user dictionary remain available.
   bool ignore_zenz_feedback = false;
+
+  // Keep a postal-code numeric literal TOP1 during live conversion, as well
+  // as explicit conversion in live mode; leave the ZIP dictionary enabled.
+  bool prefer_zipcode_literal_top = false;
 };
 
 // Class handling ConverterInterface with a session state.  This class

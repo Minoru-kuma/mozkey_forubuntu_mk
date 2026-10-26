@@ -5162,6 +5162,190 @@ TEST_F(SessionTest,
 }
 #endif  // defined(_WIN32)
 
+TEST_F(SessionTest, PostalLiveFirstSpaceSelectsExistingAddressCandidate) {
+  for (const char* key : {"1000001", "100-0001"}) {
+    SCOPED_TRACE(key);
+    MockEngine engine;
+    std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    SessionTestPeer session_peer(session);
+    InitSessionToPrecomposition(&session);
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(false);
+    config.set_use_zip_code_conversion(true);
+    config.set_session_keymap(config::Config::MSIME);
+    session.SetConfig(config);
+    commands::Command command;
+    InsertCharacterString(key, key, &session, &command);
+    ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+    ASSERT_EQ(session.context().composer().GetQueryForConversion(), key);
+
+    config.set_use_live_conversion(true);
+    config.set_live_conversion_delay_msec(0);
+    session.SetConfig(config);
+    session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+    EXPECT_CALL(*backend, StartConversion(_, _))
+        .WillOnce([&](const ConversionRequest& request, Segments* segments) {
+          EXPECT_TRUE(request.options().use_zip_code_conversion);
+          if (std::string(key).size() == 7) {
+            EXPECT_TRUE(request.options().enable_hyphenless_zipcode_alias);
+          }
+          segments->InitForConvert(request.key());
+          Segment* seg = segments->mutable_conversion_segment(0);
+          AddCandidate(key, "東京都千代田区千代田", seg);
+          AddCandidate(key, key, seg);
+          return true;
+        });
+    command.Clear();
+    ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+    ASSERT_TRUE(session_peer.live_conversion_active_());
+    EXPECT_TRUE(command.output().live_conversion());
+    EXPECT_PREEDIT(key, command);
+    Mock::VerifyAndClearExpectations(backend.get());
+    EXPECT_CALL(*backend, StartConversion(_, _)).Times(0);
+
+    command.Clear();
+    ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+    EXPECT_TRUE(command.output().consumed());
+    EXPECT_FALSE(session_peer.live_conversion_active_());
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    ASSERT_TRUE(command.output().has_candidate_window());
+    ASSERT_GE(command.output().candidate_window().candidate_size(), 2);
+    EXPECT_EQ(command.output().candidate_window().focused_index(), 1);
+    EXPECT_PREEDIT("東京都千代田区千代田", command);
+  }
+}
+
+TEST_F(SessionTest, PostalFirstSpaceShowsCandidateWindowInLiveMode) {
+  for (const char* key : {"1000001", "100-0001"}) {
+    MockEngine engine;
+    std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+    Session session(engine);
+    InitSessionToPrecomposition(&session);
+    config::Config config;
+    config::ConfigHandler::GetDefaultConfig(&config);
+    config.set_use_live_conversion(true);
+    config.set_live_conversion_delay_msec(0);
+    session.SetConfig(config);
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(Return(false));
+    commands::Command command;
+    InsertCharacterString(key, key, &session, &command);
+    Mock::VerifyAndClearExpectations(converter.get());
+    Segments segments;
+    segments.InitForConvert(key);
+    Segment* segment = segments.mutable_conversion_segment(0);
+    AddCandidate(key, key, segment);
+    AddCandidate(key, "東京都千代田区千代田", segment);
+    EXPECT_CALL(*converter, StartConversion(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+    command.Clear();
+    ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+    EXPECT_TRUE(command.output().consumed());
+    EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+    ASSERT_TRUE(command.output().has_candidate_window());
+    ASSERT_GE(command.output().candidate_window().candidate_size(), 2);
+  }
+}
+
+TEST_F(SessionTest, ZipcodeDisabledDoesNotForceInitialLiveCandidateWindow) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(true);
+  config.set_use_zip_code_conversion(false);
+  config.set_show_candidate_window_on_initial_conversion(false);
+  config.set_live_conversion_delay_msec(0);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .Times(::testing::AnyNumber())
+      .WillRepeatedly(Return(false));
+  commands::Command command;
+  InsertCharacterString("1000001", "1000001", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  Mock::VerifyAndClearExpectations(backend.get());
+
+  Segments segments;
+  segments.InitForConvert("1000001");
+  Segment* segment = segments.mutable_conversion_segment(0);
+  AddCandidate("1000001", "1000001", segment);
+  AddCandidate("1000001", "東京都千代田区千代田", segment);
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+  EXPECT_EQ(session.context().state(), ImeContext::CONVERSION);
+  EXPECT_FALSE(command.output().has_candidate_window());
+}
+
+TEST_F(SessionTest, PostalLiveSentenceKeepsZipCandidatesWithoutReconversion) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> backend = CreateEngineConverterMock(&engine);
+  Session session(engine);
+  SessionTestPeer session_peer(session);
+  InitSessionToPrecomposition(&session);
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_use_live_conversion(false);
+  config.set_use_zip_code_conversion(true);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+  commands::Command command;
+  InsertCharacterChars("kyouha1000001desu", &session, &command);
+  ASSERT_EQ(session.context().state(), ImeContext::COMPOSITION);
+  ASSERT_EQ(session.context().composer().GetQueryForConversion(),
+            "きょうは1000001です");
+
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  session.SetConfig(config);
+  session.SetKeyMapManager(std::make_shared<keymap::KeyMapManager>(config));
+  EXPECT_CALL(*backend, StartConversion(_, _))
+      .WillOnce([](const ConversionRequest& request, Segments* segments) {
+        EXPECT_TRUE(request.options().use_zip_code_conversion);
+        EXPECT_TRUE(request.options().enable_hyphenless_zipcode_alias);
+        segments->Clear();
+        Segment* head = segments->add_segment();
+        head->set_key("きょうは");
+        AddCandidate("きょうは", "今日は", head);
+        Segment* zipcode = segments->add_segment();
+        zipcode->set_key("1000001");
+        AddCandidate("1000001", "東京都千代田区千代田", zipcode);
+        AddCandidate("1000001", "1000001", zipcode);
+        Segment* tail = segments->add_segment();
+        tail->set_key("です");
+        AddCandidate("です", "です", tail);
+        return true;
+      });
+  command.Clear();
+  ASSERT_TRUE(session_peer.MaybeStartLiveConversion(&command));
+  ASSERT_TRUE(session_peer.live_conversion_active_());
+  EXPECT_PREEDIT("今日は1000001です", command);
+  Mock::VerifyAndClearExpectations(backend.get());
+  EXPECT_CALL(*backend, StartConversion(_, _)).Times(0);
+
+  // Space uses the existing segments, instead of rebuilding the candidate
+  // list. Candidate movement is normally local to the focused segment.
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+  EXPECT_FALSE(session_peer.live_conversion_active_());
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_PREEDIT("今日は1000001です", command);
+
+  command.Clear();
+  ASSERT_TRUE(session.SegmentFocusRight(&command));
+  command.Clear();
+  ASSERT_TRUE(SendSpecialKey(commands::KeyEvent::SPACE, &session, &command));
+  EXPECT_PREEDIT("今日は東京都千代田区千代田です", command);
+}
+
 TEST_F(SessionTest, LiveConversionUsesDefaultMinKeyLength) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);

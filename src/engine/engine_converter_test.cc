@@ -606,6 +606,168 @@ TEST_F(EngineConverterTest, Convert) {
   EXPECT_FALSE(IsCandidateListVisible(converter));
 }
 
+TEST_F(EngineConverterTest, ExplicitZipcodeLiteralPriority) {
+  for (const char* key : {"1000001", "100-0001"}) {
+    for (const bool prefer_literal : {false, true}) {
+      auto mock_converter = std::make_shared<MockConverter>();
+      EngineConverter converter(mock_converter, request_, config_);
+      // SetPreeditTextForTestOnly appends to the current composition.
+      composer_->Reset();
+      composer_->SetPreeditTextForTestOnly(key);
+      Segments segments;
+      segments.InitForConvert(key);
+      Segment* segment = segments.mutable_conversion_segment(0);
+      converter::Candidate* address = segment->add_candidate();
+      address->key = key;
+      address->content_key = key;
+      address->value = "東京都千代田区千代田";
+      address->content_value = address->value;
+      converter::Candidate* literal = segment->add_candidate();
+      literal->key = key;
+      literal->content_key = key;
+      literal->value = key;
+      literal->content_value = literal->value;
+      EXPECT_CALL(*mock_converter, StartConversion(_, _))
+          .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+      ConversionPreferences preferences = converter.conversion_preferences();
+      preferences.prefer_zipcode_literal_top = prefer_literal;
+      ASSERT_TRUE(converter.Convert(*composer_, Context::default_instance(),
+                                    preferences));
+      const Segments& output_segments = GetSegments(converter);
+      ASSERT_EQ(output_segments.conversion_segments_size(), 1);
+      EXPECT_EQ(output_segments.conversion_segment(0).candidate(0).value,
+                prefer_literal ? key : "東京都千代田区千代田");
+    }
+  }
+}
+
+TEST_F(EngineConverterTest, ExplicitZipcodeLiteralPriorityInSentence) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->SetPreeditTextForTestOnly("きょうは1000001です");
+  Segments segments;
+  AddSegmentWithSingleCandidate(&segments, "きょうは", "今日は");
+  Segment* zipcode = segments.add_segment();
+  zipcode->set_key("1000001");
+  converter::Candidate* address = zipcode->add_candidate();
+  address->key = "1000001";
+  address->content_key = address->key;
+  address->value = "東京都千代田区千代田";
+  address->content_value = address->value;
+  converter::Candidate* literal = zipcode->add_candidate();
+  literal->key = "1000001";
+  literal->content_key = literal->key;
+  literal->value = "1000001";
+  literal->content_value = literal->value;
+  AddSegmentWithSingleCandidate(&segments, "です", "です");
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  ConversionPreferences preferences = converter.conversion_preferences();
+  preferences.prefer_zipcode_literal_top = true;
+  ASSERT_TRUE(converter.Convert(*composer_, Context::default_instance(),
+                                preferences));
+  const Segments& output = GetSegments(converter);
+  ASSERT_EQ(output.conversion_segments_size(), 3);
+  EXPECT_EQ(output.conversion_segment(0).candidate(0).value, "今日は");
+  EXPECT_EQ(output.conversion_segment(1).candidate(0).value, "1000001");
+  EXPECT_EQ(output.conversion_segment(1).candidate(1).value,
+            "東京都千代田区千代田");
+}
+
+TEST_F(EngineConverterTest, ExplicitZipcodeLiteralFromMetaCandidate) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  composer_->SetPreeditTextForTestOnly("1000001");
+  Segments segments;
+  segments.InitForConvert("1000001");
+  Segment* segment = segments.mutable_conversion_segment(0);
+  converter::Candidate* address = segment->add_candidate();
+  address->key = "1000001";
+  address->value = "東京都千代田区千代田";
+  converter::Candidate* literal = segment->add_meta_candidate();
+  literal->key = "1000001";
+  literal->value = "1000001";
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  ConversionPreferences preferences = converter.conversion_preferences();
+  preferences.prefer_zipcode_literal_top = true;
+  ASSERT_TRUE(converter.Convert(*composer_, Context::default_instance(),
+                                preferences));
+  const Segments& output_segments = GetSegments(converter);
+  ASSERT_EQ(output_segments.conversion_segments_size(), 1);
+  EXPECT_EQ(output_segments.conversion_segment(0).candidate(0).value,
+            "1000001");
+}
+
+TEST_F(EngineConverterTest, LiveZipcodeEnablesAliasAndPromotesLiteral) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  config_->set_use_zip_code_conversion(true);
+  composer_->Reset();
+  composer_->SetPreeditTextForTestOnly("1000001");
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce([](const ConversionRequest& request, Segments* segments) {
+        EXPECT_TRUE(request.options().use_zip_code_conversion);
+        EXPECT_TRUE(request.options().enable_hyphenless_zipcode_alias);
+        segments->InitForConvert(request.key());
+        Segment* segment = segments->mutable_conversion_segment(0);
+        converter::Candidate* address = segment->add_candidate();
+        address->key = request.key();
+        address->content_key = address->key;
+        address->value = "東京都千代田区千代田";
+        address->content_value = address->value;
+        converter::Candidate* literal = segment->add_candidate();
+        literal->key = request.key();
+        literal->content_key = literal->key;
+        literal->value = "1000001";
+        literal->content_value = literal->value;
+        return true;
+      });
+  ConversionPreferences preferences = converter.conversion_preferences();
+  preferences.prefer_zipcode_literal_top = true;
+  ASSERT_TRUE(converter.Convert(*composer_, Context::default_instance(),
+                                preferences));
+  const Segments& result = GetSegments(converter);
+  ASSERT_EQ(result.conversion_segments_size(), 1);
+  EXPECT_EQ(result.conversion_segment(0).candidate(0).value, "1000001");
+  EXPECT_EQ(result.conversion_segment(0).candidate(1).value,
+            "東京都千代田区千代田");
+  EXPECT_TRUE(config_->use_zip_code_conversion());
+}
+
+TEST_F(EngineConverterTest, ZipcodeDisabledDoesNotPromoteLiveLiteral) {
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+  config_->set_use_zip_code_conversion(false);
+  composer_->Reset();
+  composer_->SetPreeditTextForTestOnly("1000001");
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce([](const ConversionRequest& request, Segments* segments) {
+        EXPECT_FALSE(request.options().use_zip_code_conversion);
+        EXPECT_FALSE(request.options().enable_hyphenless_zipcode_alias);
+        segments->InitForConvert(request.key());
+        Segment* segment = segments->mutable_conversion_segment(0);
+        converter::Candidate* first = segment->add_candidate();
+        first->key = request.key();
+        first->value = "東京都千代田区千代田";
+        converter::Candidate* literal = segment->add_candidate();
+        literal->key = request.key();
+        literal->value = "1000001";
+        return true;
+      });
+  ConversionPreferences preferences = converter.conversion_preferences();
+  // Live conversion still sends this preference. With ZIP disabled it must
+  // have no effect on the engine converter's candidate order.
+  preferences.prefer_zipcode_literal_top = true;
+  ASSERT_TRUE(converter.Convert(*composer_, Context::default_instance(),
+                                preferences));
+  const Segments& result = GetSegments(converter);
+  ASSERT_EQ(result.conversion_segments_size(), 1);
+  EXPECT_EQ(result.conversion_segment(0).candidate(0).value,
+            "東京都千代田区千代田");
+  EXPECT_EQ(result.conversion_segment(0).candidate(1).value, "1000001");
+}
+
 TEST_F(EngineConverterTest, ConvertWithSpellingCorrection) {
   auto mock_converter = std::make_shared<MockConverter>();
   EngineConverter converter(mock_converter, request_, config_);

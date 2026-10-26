@@ -148,6 +148,11 @@ struct ConversionOptions {
   // Zip code conversion. Populated from Config.
   bool use_zip_code_conversion = true;
 
+  // Allow a seven-digit alias of a hyphenated postal-code dictionary entry.
+  // ConversionRequest enables this for ordinary and live full conversion;
+  // lattice and dictionary lookups enforce ASCII-alphanumeric boundaries.
+  bool enable_hyphenless_zipcode_alias = false;
+
   // T13N conversion. Populated from Config.
   bool use_t13n_conversion = true;
 

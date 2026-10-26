@@ -320,6 +320,43 @@ bool ContainsStringView(std::initializer_list<absl::string_view> values,
   return false;
 }
 
+// Identify a standalone postal-code token when deciding whether to expose
+// the initial candidate window. ZIP-enabled live conversion already retains
+// the same converter candidate set, so no Space-triggered rebuild is needed.
+// ASCII-alphanumeric boundaries prevent matches inside longer IDs.
+bool HasExplicitPostalCodeToken(absl::string_view key) {
+  const auto ascii_digit = [](char c) { return c >= '0' && c <= '9'; };
+  const auto ascii_alnum = [&](char c) {
+    return ascii_digit(c) || (c >= 'A' && c <= 'Z') ||
+           (c >= 'a' && c <= 'z');
+  };
+  for (size_t i = 0; i < key.size(); ++i) {
+    if (!ascii_digit(key[i]) || (i > 0 && ascii_alnum(key[i - 1]))) {
+      continue;
+    }
+    const auto valid_end = [&](size_t n) {
+      return i + n == key.size() || !ascii_alnum(key[i + n]);
+    };
+    if (key.size() - i >= 7 && valid_end(7) &&
+        std::all_of(key.begin() + i, key.begin() + i + 7, ascii_digit)) {
+      return true;
+    }
+    if (key.size() - i >= 8 && key[i + 3] == '-' && valid_end(8)) {
+      bool formatted = true;
+      for (size_t j = 0; j < 8; ++j) {
+        if (j != 3 && !ascii_digit(key[i + j])) {
+          formatted = false;
+          break;
+        }
+      }
+      if (formatted) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool ShouldSkipLiveConversionForCompositionKey(
     absl::string_view key, size_t min_key_length) {
   if (Util::CharsLen(key) < min_key_length) {
@@ -4295,7 +4332,13 @@ bool Session::MaybeStartLiveConversionInternal(
   pending_live_conversion_suggestion_context_.reset();
   pending_live_conversion_holds_passive_suggestion_ = false;
 
-  if (!context_->mutable_converter()->Convert(context_->composer())) {
+  // Keep ZIP lookup enabled during live conversion, while keeping the
+  // numeric literal first. Space can then navigate the SAME candidate set.
+  ConversionPreferences live_preferences =
+      context_->converter().conversion_preferences();
+  live_preferences.prefer_zipcode_literal_top = true;
+  if (!context_->mutable_converter()->ConvertWithPreferences(
+          context_->composer(), live_preferences)) {
     if (ShouldKeepPendingLiveConversionForTransientSokuon(live_conversion_key) &&
         OutputPendingLiveConversion(command)) {
       ClearZenzLiveCorrectionState();
@@ -9957,8 +10000,12 @@ bool Session::Convert(commands::Command* command) {
   const std::string composition = context_->composer().GetQueryForConversion();
   const bool should_show_candidate_window_on_initial_conversion =
       context_->state() == ImeContext::COMPOSITION &&
-      context_->GetConfig().show_candidate_window_on_initial_conversion() &&
-      !context_->GetConfig().use_live_conversion();
+      ((context_->GetConfig().show_candidate_window_on_initial_conversion() &&
+        !context_->GetConfig().use_live_conversion()) ||
+       (context_->GetConfig().use_live_conversion() &&
+        context_->GetConfig().use_zip_code_conversion() &&
+        (composition.size() == 7 || composition.size() == 8) &&
+        HasExplicitPostalCodeToken(composition)));
 
   // TODO(komatsu): Make a function like ConvertOrSpace.
   // Handle a space key on the ASCII composition mode.
@@ -9996,8 +10043,13 @@ bool Session::Convert(commands::Command* command) {
     }
   }
 
-  if (!context_->mutable_converter()->Convert(context_->composer(),
-                                              context_->client_context())) {
+  ConversionPreferences explicit_preferences =
+      context_->converter().conversion_preferences();
+  explicit_preferences.prefer_zipcode_literal_top =
+      context_->GetConfig().use_live_conversion();
+  if (!context_->mutable_converter()->Convert(
+          context_->composer(), context_->client_context(),
+          explicit_preferences)) {
     LOG(ERROR) << "Conversion failed for some reasons.";
     OutputComposition(command);
     return true;
@@ -10018,6 +10070,8 @@ bool Session::ConvertWithoutHistory(commands::Command* command) {
   ConversionPreferences preferences =
       context_->converter().conversion_preferences();
   preferences.use_history = false;
+  preferences.prefer_zipcode_literal_top =
+      context_->GetConfig().use_live_conversion();
   if (!context_->mutable_converter()->Convert(
           context_->composer(), context_->client_context(), preferences)) {
     LOG(ERROR) << "Conversion failed for some reasons.";

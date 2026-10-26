@@ -46,6 +46,7 @@
 #include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "base/strings/japanese.h"
 #include "base/text_normalizer.h"
 #include "base/util.h"
 #include "base/vlog.h"
@@ -75,6 +76,69 @@ namespace {
 
 using ::mozc::commands::Request;
 using ::mozc::config::Config;
+
+bool IsAsciiDigit(char c) { return c >= '0' && c <= '9'; }
+
+bool IsStandalonePostalCode(absl::string_view key) {
+  if (key.size() == 7) {
+    return std::all_of(key.begin(), key.end(), IsAsciiDigit);
+  }
+  if (key.size() != 8 || key[3] != '-') {
+    return false;
+  }
+  for (size_t i = 0; i < key.size(); ++i) {
+    if (i != 3 && !IsAsciiDigit(key[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// This runs after all converter and contextual reranking. Keep a literal
+// numeral top-ranked within each postal-code segment, including in sentences.
+// Never manufacture a candidate using an address candidate's POS IDs.
+void PreferStandalonePostalLiteral(const composer::Composer& composer,
+                                   Segments* segments) {
+  const std::string full_query = composer.GetQueryForConversion();
+  for (Segment& segment : segments->conversion_segments()) {
+    const std::string key(segment.key());
+    if (!IsStandalonePostalCode(key) || segment.candidates_size() == 0) {
+      continue;
+    }
+    const bool whole_input =
+        segments->conversion_segments_size() == 1 && key == full_query;
+    const std::string preedit = whole_input ? composer.GetStringForPreedit()
+                                           : std::string();
+    const std::string fullwidth =
+        japanese::HalfWidthAsciiToFullWidthAscii(key);
+    bool promoted = false;
+    for (const std::string& value : {preedit, key, fullwidth}) {
+      if (value.empty()) {
+        continue;
+      }
+      for (int i = 0; i < segment.candidates_size(); ++i) {
+        if (segment.candidate(i).value == value) {
+          segment.move_candidate(i, 0);
+          promoted = true;
+          break;
+        }
+      }
+      if (promoted) {
+        break;
+      }
+      for (size_t i = 0; i < segment.meta_candidates_size(); ++i) {
+        if (segment.meta_candidate(i).value == value) {
+          segment.move_candidate(-static_cast<int>(i) - 1, 0);
+          promoted = true;
+          break;
+        }
+      }
+      if (promoted) {
+        break;
+      }
+    }
+  }
+}
 
 bool IsSuppressibleCandidate(const Segment& segment, int candidate_index) {
   // Desktop conversion requires at least one regular candidate per segment.
@@ -229,6 +293,12 @@ bool EngineConverter::Convert(const composer::Composer& composer,
 
   ContextualCandidateReranker contextual_candidate_reranker;
   contextual_candidate_reranker.Rerank(&segments_);
+  // The numeric TOP1 override belongs to the ZIP feature. When that feature
+  // is disabled, retain the converter's original ranking even in live mode.
+  if (preferences.prefer_zipcode_literal_top &&
+      conversion_request.options().use_zip_code_conversion) {
+    PreferStandalonePostalLiteral(composer, &segments_);
+  }
 
 #if defined(_WIN32) && defined(MOZC_LEFT_CONTEXT_DEBUG)
   MozcLeftContextDebugOutput(absl::StrCat(

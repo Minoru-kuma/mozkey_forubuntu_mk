@@ -136,7 +136,11 @@ void InsertCorrectedNodes(size_t pos, absl::string_view key,
   }
   KeyCorrectedNodeListBuilder builder(pos, key, *key_corrector,
                                       lattice->node_allocator());
-  dictionary.LookupPrefix(prefix, options, &builder);
+  // Typing correction must not reinterpret a corrected numeric fragment as
+  // a ZIP code; the alias is only allowed at genuine lattice key boundaries.
+  ConversionOptions corrected_options = options;
+  corrected_options.enable_hyphenless_zipcode_alias = false;
+  dictionary.LookupPrefix(prefix, corrected_options, &builder);
   lattice->Insert(pos, builder.result_view());
 }
 
@@ -2299,7 +2303,19 @@ std::vector<Node*> ImmutableConverter::Lookup(int begin_pos,
   if (is_reverse) {
     dictionary_.LookupReverse(key_substr, options, &builder);
   } else {
-    dictionary_.LookupPrefix(key_substr, options, &builder);
+    ConversionOptions lookup_options = options;
+    // The dictionary receives only a suffix: check the previous byte in the
+    // complete lattice key. Never interpret a substring of an ASCII-alphanumeric
+    // identifier (such as ID1000000 or 1231000000) as a postal code.
+    if (begin_pos > 0 && begin_pos <= static_cast<int>(key.size())) {
+      const char previous = key[begin_pos - 1];
+      if ((previous >= '0' && previous <= '9') ||
+          (previous >= 'A' && previous <= 'Z') ||
+          (previous >= 'a' && previous <= 'z')) {
+        lookup_options.enable_hyphenless_zipcode_alias = false;
+      }
+    }
+    dictionary_.LookupPrefix(key_substr, lookup_options, &builder);
   }
   AddCharacterTypeBasedNodes(key_substr, lattice, &builder);
 

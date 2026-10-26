@@ -87,6 +87,7 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - 句読点・記号の単打確定でも、直前の通常変換確定による学習を次の実テキスト入力まで保留し、Backspace / Escape / Ctrl+Z などの Cancel 相当キー / Revert / Reset / Undo などでは取り消し、IMEOff / MakeSureIMEOff では確定扱いにするようにした
 - ライブ変換機能を追加。未確定文字列を自動変換し、確定前の読みをルビ風 overlay で表示
 - ライブ変換は設定画面から ON/OFF、変換開始までの遅延時間、変換開始の最小文字数を変更可能
+- ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
 - ローマ字入力中、確定済みの読みの後ろに未解決のローマ字 suffix が残る間は、入力途中の一時的な Roman prefix ごとに passive suggestion を再計算して候補ウィンドウがちらつくのを抑えるため、直前まで表示していた候補を保持。suffix が解決した時点で更新を再開し、候補へ移動する場合も表示中の候補集合をそのまま使用
@@ -285,13 +286,23 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 ライブ変換は設定画面から ON/OFF を切り替えられます。また、変換開始までの遅延時間と、ライブ変換を開始する最小文字数も設定画面から変更できます。
 
+### ハイフンなし郵便番号の変換
+
+「郵便番号変換」が有効な場合、`100-0001` のような従来のハイフン付き郵便番号に加えて、`1000001` のような**ハイフンなし7桁**からも住所候補（例：`東京都千代田区千代田`）を取得できます。全角数字で入力した場合も、変換用のキーを正規化して扱います。既存のハイフン付き郵便番号辞書を検索時に参照する方式で、住所エントリを二重登録するものではありません。
+
+**ライブ変換ON**では、7桁の数字部分を含む変換文節について、数字表記を第1候補に保ち、住所は後続候補として残します。単独の郵便番号 `1000001` がすでにライブ変換されていれば、キー設定で `ConvertNext` に割り当てたキー（標準では Space）を押すと、候補を再生成せず次の候補へ進めます。住所が次候補に並んでいれば、その操作で住所を選択できます。候補順位は辞書・履歴などの影響を受けるため、住所が必ず第2候補になるとは限りません。`きょうは1000001です` のような文章内でも、周囲の日本語のライブ変換を継続しつつ数字表記を優先します。文節をまたぐ場合は、通常の文節選択操作で対象の郵便番号文節に移動してください。
+
+**ライブ変換OFF**では、数字表記を第1候補へ強制移動せず、従来の辞書・学習履歴による候補順位を維持します。「郵便番号変換」をOFFにすると、ハイフンなし郵便番号の住所エイリアスと専用の候補順位制御は適用しません。
+
+英数字の識別子を誤認識しないよう、`ID1000000`、`1000000ABC`、`1231000000` など、7桁の直前・直後にASCII英数字が連続する場合は、ハイフンなし郵便番号エイリアスを生成しません。現在の境界保護はASCII英数字を対象とし、あらゆる記号やUnicode英数字を含む識別子の判定を保証するものではありません。なお、ここでの `ConvertNext` は通常の Mozc ライブ変換の候補移動です。Zenz 補正結果の表示中に Space で Mozc 結果へ戻す処理は別経路で、一部は物理 Space キーを判定するため、別キーに `ConvertNext` を割り当てても完全に同じ動作になるとは限りません。
+
 ### ライブ変換 OFF 時の初回変換操作での候補表示
 
 ライブ変換を使わない場合の補助機能として、初回の変換操作で候補ウィンドウを開く設定を追加しています。この設定は既定で有効です。
 
 この設定が有効な場合、未確定文字列の入力中に通常変換コマンドを実行した時点で、第1文節の候補ウィンドウを表示します。このとき選択候補は第1候補のままで、第2候補へは進みません。さらに次候補キーを押した場合は、従来どおり次候補へ進みます。
 
-この機能はライブ変換がオフの場合だけ適用されます。Space 以外のキーに通常変換を割り当てている場合も、keymap で `Convert` に解決された初回の変換操作で同じように適用されます。ライブ変換がオンの場合は、既存のライブ変換中の Space 操作、つまり通常変換候補への移行と候補移動の挙動を優先します。従来の表示タイミングに戻したい場合は、設定画面から無効化できます。
+この一般設定はライブ変換がOFFの場合だけ適用されます。Space以外のキーに通常変換を割り当てている場合も、keymapで`Convert`に解決された初回の変換操作で同じように適用されます。ライブ変換がONの場合は、通常のライブ変換から候補選択への移行を優先します。ただし、**「郵便番号変換」ONかつ単独の7桁（またはハイフン付き7桁）の郵便番号を明示変換する場合**は、この一般設定とは独立して初回の候補ウィンドウを表示する特例があります。一般設定を無効化すると、郵便番号以外のライブ変換OFF時の表示タイミングを従来どおりに戻せます。
 
 ### Zenz ライブ補正
 
@@ -1007,6 +1018,7 @@ Main features added in this fork
 - Keeps learning caused by direct-commit punctuations/symbols pending until the next real text input, reverts it on Backspace, Escape, cancel-equivalent keys such as Ctrl+Z, Revert, Reset, or Undo, and confirms it on IMEOff / MakeSureIMEOff
 - Adds live conversion that automatically converts the current composition and shows a ruby-like overlay for the original reading
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
+- Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
 - Reduces candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes after an already resolved reading; Mozkey holds the currently displayed suggestion list until the suffix resolves, then resumes refresh, and entering the list keeps the exact displayed candidates
 - For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
@@ -1157,6 +1169,16 @@ For example:
 During live conversion, this fork shows a small ruby-like overlay window above the preedit text so that the original reading remains visible while the converted text is shown.
 
 The live conversion feature can be enabled or disabled from the config dialog. The debounce delay and the minimum number of characters required to start live conversion can also be configured there.
+
+### Hyphenless postal-code conversion
+
+When **Postal code conversion** is enabled, a seven-digit input such as `1000001` can produce the corresponding address candidate (for example, `東京都千代田区千代田`) without typing the hyphen in `100-0001`. Full-width digit input is normalized for conversion. Mozkey reuses the existing hyphenated postal-code dictionary entries at lookup time instead of duplicating the address data.
+
+With **live conversion ON**, the numeric literal remains the first candidate for the postal-code segment, while the address remains available as a subsequent candidate. For a standalone `1000001` that has already undergone live conversion, a key assigned to `ConvertNext` (Space in the standard keymap) advances through the **existing candidate list without rebuilding it**. If the address is next, it is selected on that keypress; its exact position may vary with other candidates and user history. Postal codes embedded in Japanese sentences can retain their numeric form while surrounding text continues to convert; use the normal segment-navigation keys when needed. With **live conversion OFF**, the original dictionary/history ranking is preserved rather than forcing the numeric candidate first.
+
+Disabling **Postal code conversion** disables the hyphenless address alias and its special numeric-first ranking. To avoid interpreting parts of ASCII-alphanumeric identifiers as postal codes, the alias is suppressed in inputs such as `ID1000000`, `1000000ABC`, and `1231000000`. This boundary check covers ASCII letters and digits; it is not a general identifier parser for all punctuation or Unicode alphanumeric forms. This `ConvertNext` behavior describes ordinary Mozc live conversion. The separate Zenz-to-Mozc revert behavior may check for physical Space, so remapping `ConvertNext` to another key does not guarantee identical behavior while a Zenz correction is visible.
+
+The separate setting to show the candidate window on the first conversion normally applies when live conversion is OFF. Standalone postal codes are an exception: when live conversion and postal code conversion are ON, an explicit first conversion can open the candidate window independently of that setting.
 
 ### Zenz live correction
 
