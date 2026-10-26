@@ -8,20 +8,43 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $OutDir = Join-Path $RepoRoot "src\data\dictionary_koyasi\generated\personal_names"
 $Bz2 = Join-Path $OutDir "mozcdic-ut-personal-names.txt.bz2"
 $Txt = Join-Path $OutDir "mozcdic-ut-personal-names.txt"
-$Url = "https://raw.githubusercontent.com/utuhiro78/mozcdic-ut-personal-names/main/mozcdic-ut-personal-names.txt.bz2"
+$LockFile = Join-Path $PSScriptRoot "locks\daily_sources.json"
+$Lock = Get-Content -LiteralPath $LockFile -Encoding UTF8 -Raw | ConvertFrom-Json
+$Repository = [string]$Lock.personal_names.repository
+$Revision = [string]$Lock.personal_names.revision
+$ExpectedHash = ([string]$Lock.personal_names.sha256).ToUpperInvariant()
+$ExpectedBytes = [long]$Lock.personal_names.bytes
+if ($Repository -ne 'utuhiro78/mozcdic-ut-personal-names' -or $Revision -notmatch '^[0-9a-f]{40}$') {
+    throw "Invalid pinned personal-names repository or revision"
+}
+$Url = "https://raw.githubusercontent.com/$Repository/$Revision/$($Lock.personal_names.path)"
 
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 
 if (-not $SkipDownload) {
-  Write-Host "Downloading mozcdic-ut personal names dictionary..."
+  Write-Host "Downloading SHA256-locked personal names dictionary..."
   Write-Host "  $Url"
-  Invoke-WebRequest -Uri $Url -OutFile $Bz2
+  $Tmp = $Bz2 + "." + [guid]::NewGuid().ToString('N') + ".tmp"
+  try {
+    Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing
+    if ((Get-Item -LiteralPath $Tmp).Length -ne $ExpectedBytes) { throw "Pinned personal names byte count mismatch" }
+    if ((Get-FileHash -LiteralPath $Tmp -Algorithm SHA256).Hash -ne $ExpectedHash) {
+      throw "Pinned personal names SHA256 mismatch"
+    }
+    Move-Item -LiteralPath $Tmp -Destination $Bz2 -Force
+  } finally {
+    if (Test-Path -LiteralPath $Tmp) { Remove-Item -LiteralPath $Tmp -Force }
+  }
 } else {
-  Write-Host "Skipping download."
+  Write-Host "Skipping download; verifying pinned archive."
 }
 
-if (-not (Test-Path $Bz2)) {
+if (-not (Test-Path -LiteralPath $Bz2 -PathType Leaf)) {
   throw "bz2 file does not exist: $Bz2"
+}
+if ((Get-Item -LiteralPath $Bz2).Length -ne $ExpectedBytes -or
+    (Get-FileHash -LiteralPath $Bz2 -Algorithm SHA256).Hash -ne $ExpectedHash) {
+  throw "Pinned personal names archive differs from lock; refusing to unpack"
 }
 
 $env:MOZKEY_PERSONAL_NAMES_BZ2 = (Resolve-Path $Bz2).Path
