@@ -9,35 +9,26 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $OutDir = Join-Path $RepoRoot "src\data\dictionary_koyasi\generated\nico_pixiv"
 $OutFile = Join-Path $OutDir "dic-nico-intersection-pixiv-google.txt"
 
-# Resolve the source's current master HEAD on every import.
-# Pin that resolved revision only for the duration of this download, so a
-# concurrent upstream update cannot mix versions in a single run.
-$Repositories = @{
-    ncaq = "ncaq/dic-nico-intersection-pixiv"
-    Niccori250k = "Niccori250k/dic-nico-intersection-pixiv"
+# Daily builds must never resolve a moving branch.
+$LockFile = Join-Path $PSScriptRoot "locks\daily_sources.json"
+$Lock = Get-Content -LiteralPath $LockFile -Encoding UTF8 -Raw | ConvertFrom-Json
+if ($Source -ne "Niccori250k") {
+    throw "Only Niccori250k is supported by the reviewed daily lock. Update lock via separate review."
 }
-$Repository = $Repositories[$Source]
-$Ref = "refs/heads/master"
-$Remote = "https://github.com/$Repository.git"
-$RemoteResult = @(& git ls-remote --heads $Remote $Ref)
-if ($LASTEXITCODE -ne 0) {
-    throw "Unable to resolve latest dictionary revision: $Remote"
+$Repository = [string]$Lock.nico_pixiv.repository
+$Revision = [string]$Lock.nico_pixiv.revision
+$ExpectedHash = ([string]$Lock.nico_pixiv.sha256).ToUpperInvariant()
+$ExpectedBytes = [long]$Lock.nico_pixiv.bytes
+if ($Repository -ne 'Niccori250k/dic-nico-intersection-pixiv' -or $Revision -notmatch '^[0-9a-f]{40}$') {
+    throw "Invalid pinned Nico/Pixiv repository or revision"
 }
-if ($RemoteResult.Count -ne 1) {
-    throw "Unexpected git ls-remote result count for $Remote ($Ref): $($RemoteResult -join '; ')"
-}
-$RevisionMatch = [regex]::Match($RemoteResult[0], '^([0-9a-fA-F]{40})\s+refs/heads/master$')
-if (-not $RevisionMatch.Success) {
-    throw "Unexpected git ls-remote result for $Remote ($Ref): $($RemoteResult[0])"
-}
-$Revision = $RevisionMatch.Groups[1].Value.ToLowerInvariant()
-$Url = "https://raw.githubusercontent.com/$Repository/$Revision/public/dic-nico-intersection-pixiv-google.txt"
+$Url = "https://raw.githubusercontent.com/$Repository/$Revision/$($Lock.nico_pixiv.path)"
 
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $TempFile = Join-Path $OutDir ("dic-nico-intersection-pixiv-google.txt." + [guid]::NewGuid().ToString("N") + ".tmp")
 
 Write-Host "Source: $Source"
-Write-Host "Upstream branch: master (latest at download time)"
+Write-Host "Upstream: SHA256-locked commit"
 Write-Host "Resolved revision: $Revision"
 Write-Host "Downloading: $Url"
 Write-Host "Output: $OutFile"
@@ -48,12 +39,18 @@ try {
     if ($Bytes -lt 5000000) {
         throw "Unexpectedly small nico/pixiv dictionary: $Bytes bytes"
     }
+    if ($Bytes -ne $ExpectedBytes) {
+        throw "Nico/Pixiv pinned byte count mismatch: expected $ExpectedBytes got $Bytes"
+    }
     # Reject truncated or unrecognized content before replacing last known good data.
     $Header = @(Get-Content -LiteralPath $TempFile -Encoding UTF8 -TotalCount 8)
     if (-not (@($Header | Where-Object { $_ -eq '# name: dic-nico-intersection-pixiv' }).Count -gt 0)) {
         throw 'Downloaded file does not look like dic-nico-intersection-pixiv.'
     }
     $ActualHash = (Get-FileHash -LiteralPath $TempFile -Algorithm SHA256).Hash
+    if ($ActualHash -ne $ExpectedHash) {
+        throw "Nico/Pixiv pinned SHA256 mismatch: expected $ExpectedHash got $ActualHash"
+    }
     $LineCount = (Get-Content -LiteralPath $TempFile -Encoding UTF8 | Measure-Object -Line).Lines
     if ($LineCount -lt 80000 -or $LineCount -gt 250000) {
         throw "Unexpected dictionary line count: $LineCount"
@@ -70,7 +67,7 @@ try {
 $Provenance = [ordered]@{
     source = $Source
     repository = $Repository
-    upstream_ref = $Ref
+    upstream_ref = $Revision
     resolved_revision = $Revision
     download_url = $Url
     sha256 = $ActualHash
