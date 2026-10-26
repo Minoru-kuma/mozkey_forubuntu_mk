@@ -688,6 +688,7 @@ mozc_cc_test(
         "//engine",
         "//engine:engine_factory",
         "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
         "//request:conversion_request",
         "//testing:gunit_main",
         "//testing:mozctest",

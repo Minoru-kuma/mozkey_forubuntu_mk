@@ -304,6 +304,13 @@ class ConversionRequestBuilder {
         request_.config().use_spelling_correction();
     request_.options_.use_zip_code_conversion =
         request_.config().use_zip_code_conversion();
+    // Allow postal aliases for full conversion requests, including live
+    // conversion. Lattice lookup enforces left ASCII-alphanumeric boundaries;
+    // prediction and realtime predictor conversion remain excluded.
+    request_.options_.enable_hyphenless_zipcode_alias =
+        request_.options_.use_zip_code_conversion &&
+        request_.options_.request_type == RequestType::CONVERSION &&
+        !request_.options_.used_in_predictor_realtime_conversion;
     request_.options_.use_t13n_conversion =
         request_.config().use_t13n_conversion();
     if (request_.config().preedit_method() == config::Config::ROMAN) {

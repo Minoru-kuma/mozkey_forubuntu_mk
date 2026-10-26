@@ -30,6 +30,7 @@
 #include "dictionary/dictionary_impl.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
@@ -139,6 +140,99 @@ class CallbackWithFilter : public DictionaryInterface::Callback {
   DictionaryInterface::Callback* callback_ = nullptr;
 };
 
+// Postal codes are stored as XXX-XXXX in the system dictionary.  A lookup
+// alias avoids duplicating all of the address entries for the XXXXXXX form.
+// A seven-digit prefix may be followed by Japanese text or punctuation, but
+// must not be part of a longer ASCII-alphanumeric identifier.
+constexpr size_t kZipcodeDigits = 7;
+
+bool IsAsciiDigit(char c) { return c >= '0' && c <= '9'; }
+
+bool IsAsciiAlnum(char c) {
+  return IsAsciiDigit(c) || (c >= 'A' && c <= 'Z') ||
+         (c >= 'a' && c <= 'z');
+}
+
+bool HasSevenDigitZipcodePrefix(absl::string_view key) {
+  if (key.size() < kZipcodeDigits ||
+      (key.size() > kZipcodeDigits && IsAsciiAlnum(key[kZipcodeDigits]))) {
+    return false;
+  }
+  return std::all_of(key.begin(), key.begin() + kZipcodeDigits, IsAsciiDigit);
+}
+
+// The dictionary lookup uses XXX-XXXX, but the callback must expose XXXXXXX.
+// In particular, Token::key must describe the bytes consumed in the original
+// lattice, not the length of the temporary lookup key.
+class ZipcodeAliasCallback final : public DictionaryInterface::Callback {
+ public:
+  ZipcodeAliasCallback(absl::string_view original_key,
+                       const PosMatcher& pos_matcher,
+                       DictionaryInterface::Callback* callback)
+      : original_key_(original_key),
+        pos_matcher_(pos_matcher),
+        callback_(callback) {
+    DCHECK(callback_);
+  }
+
+  ResultType OnToken(absl::string_view /* key */,
+                     absl::string_view /* actual_key */,
+                     Token token) override {
+    if (!pos_matcher_.IsZipcode(token.lid) ||
+        !pos_matcher_.IsZipcode(token.rid)) {
+      return TRAVERSE_CONTINUE;
+    }
+
+    // Delay the outer callback's OnKey/OnActualKey until we have a zipcode
+    // token.  A matching key may also contain non-zipcode dictionary entries.
+    if (!started_) {
+      started_ = true;
+      ResultType result = callback_->OnKey(original_key_);
+      if (result != TRAVERSE_CONTINUE) {
+        return result;
+      }
+      result = callback_->OnActualKey(original_key_, original_key_, 0);
+      if (result != TRAVERSE_CONTINUE) {
+        return result;
+      }
+    }
+
+    token.key.assign(original_key_.data(), original_key_.size());
+    return callback_->OnToken(original_key_, original_key_, std::move(token));
+  }
+
+ private:
+  const absl::string_view original_key_;
+  const PosMatcher& pos_matcher_;
+  DictionaryInterface::Callback* callback_;
+  bool started_ = false;
+};
+
+void LookupZipcodeAlias(const DictionaryInterface& dictionary,
+                        absl::string_view key, const ConversionOptions& options,
+                        const PosMatcher& pos_matcher,
+                        DictionaryInterface::Callback* callback,
+                        bool allow_trailing_text) {
+  if (!options.use_zip_code_conversion ||
+      !options.enable_hyphenless_zipcode_alias ||
+      !HasSevenDigitZipcodePrefix(key) ||
+      (!allow_trailing_text && key.size() != kZipcodeDigits)) {
+    return;
+  }
+
+  const absl::string_view original_key = key.substr(0, kZipcodeDigits);
+  std::string lookup_key;
+  lookup_key.reserve(kZipcodeDigits + 1);
+  lookup_key.append(original_key.data(), 3);
+  lookup_key.push_back('-');
+  lookup_key.append(original_key.data() + 3, 4);
+
+  ZipcodeAliasCallback alias_callback(original_key, pos_matcher, callback);
+  // LookupExact applies the normal POS and suppression filters.  Calling it
+  // here is safe: the formatted key contains '-' and cannot create an alias.
+  dictionary.LookupExact(lookup_key, options, &alias_callback);
+}
+
 }  // namespace
 
 void DictionaryImpl::LookupPredictive(absl::string_view key,
@@ -150,6 +244,8 @@ void DictionaryImpl::LookupPredictive(absl::string_view key,
        GetDictionaries(options.incognito_mode)) {
     dic->LookupPredictive(key, &callback_with_filter);
   }
+  LookupZipcodeAlias(*this, key, options, pos_matcher_, callback,
+                     /*allow_trailing_text=*/false);
 }
 
 void DictionaryImpl::LookupPrefix(absl::string_view key,
@@ -161,6 +257,8 @@ void DictionaryImpl::LookupPrefix(absl::string_view key,
        GetDictionaries(options.incognito_mode)) {
     dic->LookupPrefix(key, &callback_with_filter);
   }
+  LookupZipcodeAlias(*this, key, options, pos_matcher_, callback,
+                     /*allow_trailing_text=*/true);
 }
 
 void DictionaryImpl::LookupExact(absl::string_view key,
@@ -172,6 +270,8 @@ void DictionaryImpl::LookupExact(absl::string_view key,
        GetDictionaries(options.incognito_mode)) {
     dic->LookupExact(key, &callback_with_filter);
   }
+  LookupZipcodeAlias(*this, key, options, pos_matcher_, callback,
+                     /*allow_trailing_text=*/false);
 }
 
 void DictionaryImpl::LookupReverse(absl::string_view str,

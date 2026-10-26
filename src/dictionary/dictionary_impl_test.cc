@@ -331,6 +331,73 @@ TEST_F(DictionaryImplTest, DisableZipCodeConversionTest) {
   }
 }
 
+TEST_F(DictionaryImplTest, HyphenlessZipcodeLookup) {
+  std::unique_ptr<DictionaryData> data = CreateDictionaryData();
+  DictionaryInterface* dictionary = data->dictionary.get();
+
+  // The mock dictionary only contains "100-0000", not "1000000".
+  constexpr char kOriginalKey[] = "1000000";
+  constexpr char kAddress[] = "東京都千代田区";
+  const LookupMethodAndQuery kPositiveCases[] = {
+      {&DictionaryInterface::LookupPrefix, kOriginalKey},
+      {&DictionaryInterface::LookupPrefix, "1000000です"},
+      {&DictionaryInterface::LookupPredictive, kOriginalKey},
+      {&DictionaryInterface::LookupExact, kOriginalKey},
+  };
+
+  config_.set_use_zip_code_conversion(true);
+  const ConversionRequest enabled = ConversionRequestBuilder()
+                                        .SetConfig(config_)
+                                        .SetKey(kOriginalKey)
+                                        .Build();
+  ASSERT_TRUE(enabled.options().enable_hyphenless_zipcode_alias);
+  for (const auto& test_case : kPositiveCases) {
+    CheckZipCodeExistenceCallback callback(kOriginalKey, kAddress,
+                                           *data->pos_matcher);
+    (dictionary->*test_case.lookup_method)(test_case.query, enabled.options(),
+                                           &callback);
+    EXPECT_TRUE(callback.found()) << test_case.query;
+  }
+
+  // Do not match partial or overlong numeric keys, even in prefix lookup.
+  constexpr absl::string_view kNonZipcodeKeys[] = {
+      "100000", "10000000", "10000000です", "x1000000", "100000x",
+      "1000000A", "1000000ABC", "1000000x", "1000000aです"};
+  for (const absl::string_view query : kNonZipcodeKeys) {
+    CheckZipCodeExistenceCallback callback(kOriginalKey, kAddress,
+                                           *data->pos_matcher);
+    dictionary->LookupPrefix(query, enabled.options(), &callback);
+    EXPECT_FALSE(callback.found()) << query;
+  }
+
+  // Sentence conversion now permits the alias. The caller that knows the
+  // lattice offset, not DictionaryImpl, checks the preceding digit boundary.
+  const ConversionRequest embedded = ConversionRequestBuilder()
+                                         .SetConfig(config_)
+                                         .SetKey("文中1000000")
+                                         .Build();
+  EXPECT_TRUE(embedded.options().enable_hyphenless_zipcode_alias);
+  {
+    CheckZipCodeExistenceCallback callback(kOriginalKey, kAddress,
+                                           *data->pos_matcher);
+    dictionary->LookupPrefix(kOriginalKey, embedded.options(), &callback);
+    EXPECT_TRUE(callback.found());
+  }
+
+  config_.set_use_zip_code_conversion(false);
+  const ConversionRequest disabled = ConversionRequestBuilder()
+                                         .SetConfig(config_)
+                                         .SetKey(kOriginalKey)
+                                         .Build();
+  for (const auto& test_case : kPositiveCases) {
+    CheckZipCodeExistenceCallback callback(kOriginalKey, kAddress,
+                                           *data->pos_matcher);
+    (dictionary->*test_case.lookup_method)(test_case.query, disabled.options(),
+                                           &callback);
+    EXPECT_FALSE(callback.found()) << test_case.query;
+  }
+}
+
 TEST_F(DictionaryImplTest, DisableT13nConversionTest) {
   std::unique_ptr<DictionaryData> data = CreateDictionaryData();
   DictionaryInterface* d = data->dictionary.get();
