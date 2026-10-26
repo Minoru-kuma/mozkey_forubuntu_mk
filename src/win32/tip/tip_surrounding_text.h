@@ -103,6 +103,12 @@ class TipSurroundingText {
                                             TipSurroundingTextInfo* info,
                                             bool* need_async_reconversion);
 
+  // Space reconversion requires a verified TSF selection. Unlike the regular
+  // reconversion path above, never request an IMM32 caret-adjacent target.
+  static bool PrepareForExplicitSelectionReconversionFromIme(
+      TipTextService* text_service, ITfContext* context,
+      TipSurroundingTextInfo* info);
+
   // Returns true when succeeds to delete preceding text from the beginning of
   // the selected range.
   // Caveats: |num_characters_to_be_deleted_in_codepoint| is not the number of
@@ -121,6 +127,10 @@ class TipSurroundingTextUtil {
  public:
   // Returns true when |text| contains a TSF embedded-object marker.
   static bool ContainsEmbeddedObject(std::wstring_view text);
+
+  // A legacy IMM32 reconversion target is not proof of explicit selection.
+  static bool HasExplicitlySelectedTextForReconversion(
+      const TipSurroundingTextInfo& info);
 
   // Returns whether reconversion preparation should move the active end of
   // the current selection to its start.  When selected text was explicitly

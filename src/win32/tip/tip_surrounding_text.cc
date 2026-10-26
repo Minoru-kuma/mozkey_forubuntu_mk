@@ -113,8 +113,8 @@ class SurroudingTextUpdater final : public TipComImplements<ITfEditSession> {
       // front character.  Do not call SetSelection for an empty selection.
       // Some TSF hosts (notably Gecko) treat even a no-op SetSelection during
       // key handling as evidence that the IME processed the physical key.
-      // That would prevent the half-width Space fallback from reaching the
-      // application when there is no text to reconvert.
+      // Avoid a no-op selection update: some hosts treat it as handling the
+      // physical key even when there is no selection to reconvert.
       const bool should_move_anchor =
           TipSurroundingTextUtil::ShouldMoveAnchorForReconversion(
               move_anchor_, retrieve_selected_text_, result_);
@@ -391,6 +391,18 @@ bool PrepareForReconversionTSF(TipTextService* text_service,
   return true;
 }
 
+bool TipSurroundingText::PrepareForExplicitSelectionReconversionFromIme(
+    TipTextService* text_service, ITfContext* context,
+    TipSurroundingTextInfo* info) {
+  if (info == nullptr) {
+    return false;
+  }
+  *info = TipSurroundingTextInfo();
+  // IMR_RECONVERTSTRING can return text near the caret without a selection.
+  // Only a successful full-TSF range read can authorize Space reconversion.
+  return PrepareForReconversionTSF(text_service, context, info);
+}
+
 bool TipSurroundingText::PrepareForReconversionFromIme(
     TipTextService* text_service, ITfContext* context,
     TipSurroundingTextInfo* info, bool* need_async_reconversion) {
@@ -455,6 +467,12 @@ bool TipSurroundingTextUtil::ContainsEmbeddedObject(
     const std::wstring_view text) {
   return text.find(static_cast<wchar_t>(TS_CHAR_EMBEDDED)) !=
          std::wstring_view::npos;
+}
+
+bool TipSurroundingTextUtil::HasExplicitlySelectedTextForReconversion(
+    const TipSurroundingTextInfo& info) {
+  return info.has_selected_text && !info.selected_text.empty() &&
+         !info.used_legacy_imm32_fallback;
 }
 
 bool TipSurroundingTextUtil::ShouldMoveAnchorForReconversion(
