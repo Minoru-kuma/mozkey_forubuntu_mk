@@ -1052,6 +1052,11 @@ bool Composer::IsPendingRomanInputAtCompositionStart() const {
          composition_.IsTrailingPendingInputAtCompositionStart();
 }
 
+bool Composer::HasTrailingDisplayedAmbiguousRomanResult() const {
+  return GetPendingRomanInputLength() > 0 &&
+         composition_.HasTrailingDisplayedAmbiguousResult();
+}
+
 size_t Composer::GetPendingRomanDisplayLength() const {
   if (!config_->dim_pending_roman_input() ||
       GetPendingRomanInputLength() == 0) {

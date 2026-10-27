@@ -243,6 +243,10 @@ class Composer final {
   // this returns false even if the suffix itself is only one character long.
   bool IsPendingRomanInputAtCompositionStart() const;
 
+  // True when the pending Roman-table suffix is displayed as a meaningful
+  // ambiguous conversion result rather than raw unresolved Roman letters.
+  bool HasTrailingDisplayedAmbiguousRomanResult() const;
+
   // Returns the number of trailing preedit characters that represent
   // unresolved Roman-table input and should use the subdued presentation.
   // This is presentation metadata only; the preedit string itself is not
