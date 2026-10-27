@@ -18,15 +18,15 @@ This product includes third-party software and model files.
 
 - Project: ggml-org/llama.cpp
 - Source repository URL: https://github.com/ggml-org/llama.cpp
-- Source tag: b10437
-- Source commit: 16d222fc5ead59d20039501a37251c9ed457a454
+- Source tag: v0.7.0
+- Source commit: 620d2225cc436ab0b001e3200e590e3b286ef9ab
 - Mozkey tokenizer compatibility patch SHA256: 6DB5C11B2DA8415D6B37200EC6AA4F3FDCDDE8EFB1E7A71375FE331A7B0E829A
-- Patched src/llama-vocab.cpp SHA256: 7E07061170256C9F5A5ACF6AE30D5C6E5A0CBB89D706EEDAE95AC5F9B46230F1
+- Patched src/llama-vocab.cpp SHA256: 2CEF3BDD758D9F2EB4CB80C1FC149C75461E9E32AF06E03D67D99E36FF69BBED
 - Source assets:
   - x64/llama-server.exe
   - arm64/llama-server.exe
 - Installed file name: llama-server.exe
-- Runtime policy: CPU-only; ggml/llama are statically linked into llama-server.exe.
+- Runtime policy: CPU-only; ggml/llama are statically linked into llama-server.exe. Windows x64 is an isolated MSVC Release build with the tracked tokenizer and dual-liveness patches (SHA256 35B953C97F870CBD7426DC865783BE36090F841C273AE779BD098E9F080F3735). Windows ARM64 is a ClangCL build with the tokenizer patch, GGML_NATIVE=OFF, GGML_CPU_ARM_ARCH=armv8-a (SHA256 6BDE0FAF466261C8233298ECB2BDF01A78AAEBE9729C03BA4EA95F045F772737). Source is pinned to upstream v0.7.0; MSI installed-lifecycle validation remains pending.
 - Microsoft Visual C++ runtime DLLs remain external dependencies and are supplied by the architecture-specific MSI runtime payload.
 - License: MIT License
 

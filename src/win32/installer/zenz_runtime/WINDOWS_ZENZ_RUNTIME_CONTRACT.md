@@ -3,10 +3,10 @@
 ## Source identity
 
 - llama.cpp repository: https://github.com/ggml-org/llama.cpp
-- tag: `b10437`
-- commit: `16d222fc5ead59d20039501a37251c9ed457a454`
+- tag: `v0.7.0`
+- commit: `620d2225cc436ab0b001e3200e590e3b286ef9ab`
 - tokenizer compatibility patch SHA256: `6DB5C11B2DA8415D6B37200EC6AA4F3FDCDDE8EFB1E7A71375FE331A7B0E829A`
-- patched `src/llama-vocab.cpp` SHA256: `7E07061170256C9F5A5ACF6AE30D5C6E5A0CBB89D706EEDAE95AC5F9B46230F1`
+- patched `src/llama-vocab.cpp` SHA256: `2CEF3BDD758D9F2EB4CB80C1FC149C75461E9E32AF06E03D67D99E36FF69BBED`
 
 ## Model identity
 
@@ -19,27 +19,42 @@
 
 - source-tree file: `x64/llama-server.exe`
 - PE: x64 / 0x8664
-- SHA256: `FE9015591099ACDA45A37D8D8D83C1B1EABA9305CE3FFAA6B3808F9FA2953251`
-- W1 canonical Zenz-v3 semantic differential: 12/12 tokenizer, first-token, cache-off, and production-like equality against the previous runtime.
+- SHA256: `35B953C97F870CBD7426DC865783BE36090F841C273AE779BD098E9F080F3735`
+- v0.7.0 x64: 119 cases x 4 paired rounds versus the tracked b10437 binary (not the historical security-backport build); 118/119 stable identical outputs; 116/119 exact reference matches for each build; mean latency 62.69 to 53.74 ms (-14.28%). Human review of one differing case and installed-IME testing remain pending.
 
 ### ARM64
 
 - source-tree file: `arm64/llama-server.exe`
 - PE: ARM64 / 0xAA64
-- SHA256: `0ACD17D6EE5E361AFC06A7DCCD06EF012A00669546535889B874D5C3BB3DE81B`
-- build basis: upstream `arm64-windows-llvm+static-release` preset with Clang target `arm64-pc-windows-msvc`
-- local cross-build structural gate: PASS
+- SHA256: `6BDE0FAF466261C8233298ECB2BDF01A78AAEBE9729C03BA4EA95F045F772737`
+- build basis: GitHub Actions `windows-11-vs2026-arm`, ClangCL, `GGML_NATIVE=OFF`, `GGML_CPU_ARM_ARCH=armv8-a`
+- ARM64 portable CI: native build, PE import audit, model load, authorization and 6/6 semantic smoke PASS (one runner)
 - historical W1 candidate native GitHub ARM64 gate: PASS
   - this validated the exact ARM64 runtime candidate before MSI integration
   - workflow run: https://github.com/koyasi777/mozkey/actions/runs/31893874478
   - workflow commit: `daa13a4df3c4b2ce4da5a51dcb2a29aa3f7f248f`
-- exact final-MSI native validation: PASS
+- historical b10437 final-MSI native validation: PASS; v0.7.0 installed-MSI gate PENDING
   - CI job: `Native ARM64 installed MSI Zenz audit`
   - the exact same-run ARM64 MSI is installed on native `windows-11-arm`
   - installed `llama-server.exe` is ARM64 and matches the fixed runtime SHA256
   - installed `mozc_zenz_scorer.exe` is ARM64
   - the installed model matches the fixed model SHA256
   - native `llama-server --version`, the canonical 12-case semantic gate, and the scorer named-pipe context gate pass from installed files
+
+## v0.7.0 candidate provenance and outstanding gates
+
+- Windows x64 **rebuilt** isolated MSVC candidate SHA256: `35B953C97F870CBD7426DC865783BE36090F841C273AE779BD098E9F080F3735` (the original `E1E0ADE4...` candidate is unavailable; no claim of identical binary).
+- Windows x64 source patches: tracked tokenizer compatibility patch and tracked dual-liveness patch (`SHA256 3267E978F61456C32DFB83B15BF0F3A75393C5F98C946EE7A2846F7121B36DDA`).
+- Windows x64 quality/performance: new SHA tested with 119 cases x 4 rounds, 118/119 stable identical, 116/119 reference exact on both, mean latency -14.28%; differing case requires human review. Baseline was tracked `b10437`, **not** the historical security-backport executable.
+- Windows ARM64 source: pinned upstream v0.7.0 plus tokenizer patch; no dual-liveness patch was applied to the ARM64 candidate.
+- Windows ARM64 portable native CI: https://github.com/koyasi777/mozkey/actions/runs/40533764179 .
+- Portable ARM64 candidate SHA256: `6BDE0FAF466261C8233298ECB2BDF01A78AAEBE9729C03BA4EA95F045F772737`.
+- ARM64 PE normal and delay imports: audited; external dependencies are Windows OS/UCRT and Microsoft Visual C++ runtime DLLs.
+- Model SHA256 and Zenz tokenizer patch SHA256 are unchanged.
+- Source includes the verified upstream chat-PEG parser security fix.
+- Tested on one Windows ARM64 CI runner. Portability across all ARM64 CPUs remains unverified.
+- v0.7.0 MSI build, installed scorer-to-server test, firewall, normal upgrade, and uninstall audits are PENDING until the integration CI completes.
+- Historical native ARM64 installed-MSI results above describe the prior runtime and must not be treated as evidence of a v0.7.0 installed MSI.
 
 ## Build/runtime policy
 
