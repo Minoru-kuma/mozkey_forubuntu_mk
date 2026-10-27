@@ -76,7 +76,8 @@ try {
     Start-Transcript -LiteralPath $transcript | Out-Null
     $transcribing=$true
     Write-Host '===== NATIVE ARM64 LLAMA v0.7.0 CANDIDATE ====='
-    $lines.Add('WorkflowVersion=v1-native-arm64-vs2026')
+    $lines.Add('WorkflowVersion=v2-native-arm64-vs2026-msvc-native')
+    $lines.Add('NativeCPUFeaturePortability=UNVERIFIED_RUNNER_SPECIFIC')
     $lines.Add('UpstreamCommitExpected='+$UpstreamCommit)
     if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') { throw "Native ARM64 runner required: $env:PROCESSOR_ARCHITECTURE" }
     $lines.Add('RunnerArchitecture=ARM64')
@@ -117,7 +118,7 @@ try {
     # The Windows 11 VS2026 ARM64 runner builds natively; this bypasses the local
     # x64 -> ARM64 cross compilation and its MSBuild SDK availability failure.
     $cmakeArgs=@('-S',$source,'-B',$build,'-G','Visual Studio 18 2026','-A','ARM64',
-        '-DGGML_STATIC=ON','-DBUILD_SHARED_LIBS=OFF','-DGGML_NATIVE=OFF',
+        '-DGGML_STATIC=ON','-DBUILD_SHARED_LIBS=OFF','-DGGML_NATIVE=ON',
         '-DGGML_OPENMP=OFF','-DGGML_BLAS=OFF','-DGGML_CPU_KLEIDIAI=OFF',
         '-DGGML_CUDA=OFF','-DGGML_VULKAN=OFF',
         '-DLLAMA_BUILD_COMMON=ON','-DLLAMA_BUILD_EXAMPLES=OFF','-DLLAMA_BUILD_TESTS=OFF',
