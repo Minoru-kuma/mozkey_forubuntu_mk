@@ -111,6 +111,13 @@ bool IsEmoticonDescription(absl::string_view description) {
          absl::StartsWith(description, "顔文字 ");
 }
 
+bool IsEmojiDescription(absl::string_view description) {
+  // Older EmojiRewriter history predates ranking_constraints persistence.
+  // Match its semantic description prefix, not the candidate's Unicode shape.
+  return description == kEmojiDescription ||
+         absl::StartsWith(description, "絵文字 ");
+}
+
 // Returns the semantic alternatives currently registered for exactly
 // (key, value).  USER_DICTIONARY tokens deliberately retain EMOTICON
 // provenance even though EMOTICON and SYMBOL share the same underlying
@@ -1860,25 +1867,25 @@ std::vector<Result> UserHistoryPredictor::MakeResults(
     result.attributes |= converter::Attribute::USER_HISTORY_PREDICTION |
                          converter::Attribute::NO_VARIANTS_EXPANSION;
 
-    // v4 migration/escape semantics:
-    //  * New history entries preserve NO_TOP in entry_flags.
-    //  * Old built-in emoticon history can be recovered from the semantic
-    //    description emitted by EmoticonRewriter ("顔文字" / "顔文字 ...").
-    //  * Old user-dictionary history can be recovered while the corresponding
-    //    EMOTICON entry is still registered.
-    //  * A currently registered same-(key,value) non-EMOTICON user entry is
-    //    an explicit request to allow this surface at rank 0 and overrides
-    //    the constrained alternative provenance.
+    // Semantic NO_TOP migration/escape semantics:
+    //  * New emoticon and emoji history stores NO_TOP in entry_flags.
+    //  * Old built-in emoticon/emoji history is recovered from the semantic
+    //    descriptions emitted by EmoticonRewriter / EmojiRewriter.
+    //  * Old user-dictionary emoticon history is recovered while its
+    //    EMOTICON entry remains registered.
+    //  * An explicit non-EMOTICON user-dictionary entry for the same key/value
+    //    allows that surface at rank 0, overriding constrained provenance.
     const UserDictionaryEmoticonMatch user_dictionary_match =
         GetUserDictionaryEmoticonMatch(user_dictionary_, result_entry->key(),
                                        result_entry->value());
     const bool has_explicit_unconstrained_user_entry =
         user_dictionary_match.has_unconstrained;
-    const bool has_emoticon_provenance =
+    const bool has_no_top_provenance =
         (result_entry->entry_flags() & ENTRY_FLAG_NO_TOP_RANK) ||
         IsEmoticonDescription(result_entry->description()) ||
+        IsEmojiDescription(result_entry->description()) ||
         user_dictionary_match.has_emoticon;
-    if (has_emoticon_provenance &&
+    if (has_no_top_provenance &&
         !has_explicit_unconstrained_user_entry) {
       result.ranking_constraints |= converter::RankingConstraint::NO_TOP;
     }

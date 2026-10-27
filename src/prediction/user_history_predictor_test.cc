@@ -690,6 +690,52 @@ TEST_F(UserHistoryPredictorTest,
   EXPECT_EQ(typed_composer.GetQueryForConversion(), "かみ");
 }
 
+// Legacy EmojiRewriter history has no persisted NO_TOP flag; its description
+// still carries semantic emoji provenance. Explicit user-dictionary SYMBOL
+// registration for the same key/value must override the constraint.
+TEST_F(UserHistoryPredictorTest, LegacyEmojiHistoryNoTopAndSymbolEscape) {
+  UserHistoryPredictor* predictor =
+      GetUserHistoryPredictorWithClearedHistory();
+  UserHistoryPredictor::Entry* entry =
+      InsertEntry(predictor, "ねこ", "🐈");
+  entry->set_description("絵文字 ネコ");
+
+  composer::Composer input_composer;
+  input_composer.SetPreeditTextForTestOnly("ねこ");
+  auto make_request = [&]() {
+    return ConversionRequestBuilder()
+        .SetComposer(input_composer)
+        .SetRequestView(request_)
+        .SetConfigView(config_)
+        .SetContextView(context_)
+        .SetRequestType(ConversionRequest::CONVERSION)
+        .SetKey("ねこ")
+        .Build();
+  };
+
+  std::vector<Result> results = predictor->Convert(make_request());
+  ASSERT_FALSE(results.empty());
+  EXPECT_EQ(results.front().value, "🐈");
+  EXPECT_NE(results.front().ranking_constraints &
+                converter::RankingConstraint::NO_TOP,
+            0);
+
+  user_dictionary::UserDictionaryStorage storage;
+  auto* symbol = storage.add_dictionaries()->add_entries();
+  symbol->set_key("ねこ");
+  symbol->set_value("🐈");
+  symbol->set_pos(user_dictionary::UserDictionary::SYMBOL);
+  GetUserDictionary().Load(std::move(storage));
+  GetUserDictionary().WaitForReloader();
+
+  results = predictor->Convert(make_request());
+  ASSERT_FALSE(results.empty());
+  EXPECT_EQ(results.front().value, "🐈");
+  EXPECT_EQ(results.front().ranking_constraints &
+                converter::RankingConstraint::NO_TOP,
+            0);
+}
+
 TEST_F(UserHistoryPredictorTest, UserHistoryPredictorTest) {
   {
     UserHistoryPredictor* predictor = GetUserHistoryPredictor();
