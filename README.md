@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="src/data/images/icon.svg" width="112" height="112" alt="Mozkey icon">
 </p>
 
@@ -102,6 +102,7 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - キー設定のコマンド列に `Delay(700)` などの待機ステップ（0～5000 ms）を追加。選択文字列の再変換後に待機して手動 Zenz 補正する操作にも対応
 - 変換候補・予測候補をキー操作から履歴削除または非表示にできる機能を追加。標準キー設定では `Ctrl+Delete` を使用し、履歴から削除できる候補はまず学習履歴だけを削除。それでも残る候補はユーザー辞書「非表示候補」の抑制単語として登録し、元のユーザー辞書候補そのものは削除しない。「非表示候補」から該当する抑制単語を削除すると再表示可能。候補ウィンドウのフッターには、選択中の候補の状態と現在のキー設定に応じて履歴削除または候補非表示の操作案内を表示
 - 通常変換では、Mozc が顔文字として意味的に識別できる候補（標準の顔文字候補、およびユーザー辞書で品詞「顔文字」として登録された候補）が、学習によって第1候補へ上がらないように制御。候補自体は一覧に残し、同じ表記でも「顔文字」以外の品詞として登録した候補は通常の順位付け・学習を許可。Zenz が独立して生成した表記は、文字列の見た目だけを理由に顔文字扱いしない
+- 標準の `EmojiRewriter` が生成する絵文字候補についても、通常変換の第1候補へ学習で昇格しないように制御。絵文字自体は候補一覧に残し、同じ表記をユーザー辞書で「記号」などとして明示的に登録した場合は通常の順位付けを許可
 - 複数コマンドは `Commit|IMEOff` のような形式で保存され、設定画面では `Commit → IMEOff` のように編集可能
 - MS-IME 風キー設定では、確定済み文字列を選択した状態で Space を押すと再変換し、未選択時は従来どおり空白を入力
 - Windows 版のキー設定で、Ctrl / Shift の左右条件を独立して「左右どちらでも / 左のみ / 右のみ」から選択可能。従来の汎用 Ctrl / Shift 割り当ても維持し、競合する異なるコマンドの割り当ては保存時に検出
@@ -603,6 +604,12 @@ CUSTOM キー設定では、既存のユーザー設定を上書きしないよ�
 
 一方、Zenz が独立して生成した候補については、その表層文字列だけを見て顔文字かどうかを推測し、この制約へ追加することはしません。既存の Mozc 候補が持つ意味情報はそのまま尊重しつつ、Zenz 固有の生成結果を文字列パターンだけで分類しない方針です。
 
+### 絵文字候補の第1候補抑制
+
+標準の `EmojiRewriter` から追加される絵文字候補にも `NO_TOP` 制約を付与します。通常変換の最終順位決定後、第1候補になっていた場合は制約のない候補を優先します。絵文字自体は削除せず、第2候補以下から選択できます。
+
+新しく学習する絵文字候補ではこの制約を履歴へ保存します。既存の学習履歴も、標準 `EmojiRewriter` による「絵文字」description が保存されている場合は制約を復元します。同じ読み・表記をユーザー辞書で「記号」などとして明示的に登録した場合は、その登録を優先して通常の第1候補を許可します。Unicode の字形だけによる絵文字判定は行わず、Zenz が独立生成した候補も表層文字列だけでは制約対象に追加しません。
+
 ### 選択文字列の Space 再変換（Windows / MS-IME 風キー設定）
 
 Windows 版の MS-IME 風キー設定では、確定済みテキストを範囲選択した状態で Space を押すと、その選択文字列を再変換します。何も選択していない場合は、従来どおり空白を入力します。
@@ -1032,6 +1039,7 @@ Main features added in this fork
 - Adds `Delay(700)`-style waiting steps (0–5000 ms) in keymap command sequences, including after selected-text reconversion
 - Adds a candidate history-delete / hide action for conversion and prediction candidates. The standard keymaps use `Ctrl+Delete`: history-backed candidates are removed from learned history first, while candidates that still remain can be stored as suppression words in the `非表示候補` user dictionary. The original user-dictionary entry is not deleted, and removing the corresponding suppression entry restores the candidate. The candidate footer shows history-delete or hide guidance for the currently selected candidate using the active key binding
 - Prevents candidates that Mozc can semantically identify as emoticons—built-in emoticon candidates and user-dictionary entries registered with the `顔文字` POS—from being promoted to the first candidate in ordinary conversion through learning. The candidates remain visible, while the same surface registered under a non-emoticon POS remains eligible for normal ranking and learning. Independently generated Zenz surfaces are not classified as emoticons from string shape alone
+- Also prevents built-in `EmojiRewriter` emoji candidates from being promoted to the top of ordinary conversion by learning. Emojis remain selectable below the first candidate, and explicit user-dictionary symbol entries with the same spelling retain ordinary ranking eligibility
 - Stores command sequences as `Commit|IMEOff` and shows them in the keymap editor as `Commit → IMEOff`
 - In the MS-IME style keymap, pressing Space while committed text is selected reconverts that selection; with no selection, Space still inserts a normal space
 - On Windows, allows independently selecting Either side / Left only / Right only for Ctrl and Shift in the keybinding editor; generic Ctrl/Shift shortcuts remain supported, while conflicting bindings for different commands are rejected when saving
@@ -1730,6 +1738,12 @@ In ordinary conversion, candidates that Mozc can semantically identify as emotic
 The restriction is based on semantic provenance carried by the candidate, not on whether the surface string merely looks like an emoticon. Therefore, the same surface such as `(^_^)` can remain eligible for ordinary ranking and learning when it is explicitly registered in the user dictionary under a non-emoticon POS such as a symbol.
 
 Independently generated Zenz candidates are not added to this restriction merely by inspecting their surface strings. Existing semantic information carried by Mozc candidates is preserved, while Zenz-specific generated output is not classified with an emoticon-shaped string heuristic.
+
+### Emoji top-candidate suppression
+
+Emoji candidates produced by the built-in `EmojiRewriter` carry `NO_TOP` ranking constraints. If an emoji reaches rank 0 during ordinary conversion, an unconstrained candidate is preferred at the final ranking step. The emoji remains available further down the candidate list.
+
+Newly committed emoji candidates preserve this constraint in user history. Older history records are recovered when their descriptions retain the semantic `絵文字` label emitted by `EmojiRewriter`. An explicit non-emoticon user-dictionary entry (for example, a symbol) with the same reading and surface still permits normal top ranking. Emoji-shaped Unicode strings and independently generated Zenz surfaces are not automatically constrained by character-shape heuristics.
 
 ### Space reconversion for selected text (Windows / MS-IME style keymap)
 
