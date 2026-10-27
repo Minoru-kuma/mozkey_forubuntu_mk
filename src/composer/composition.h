@@ -137,6 +137,8 @@ class Composition final {
   // Returns true when the trailing pending input is the composition's initial
   // unresolved input, with no fixed conversion before it.
   bool IsTrailingPendingInputAtCompositionStart() const;
+  // True when the trailing chunk has a displayed ambiguous conversion result.
+  bool HasTrailingDisplayedAmbiguousResult() const;
   // Returns the unresolved display length of the last chunk only.
   size_t GetTrailingPendingDisplayLength() const;
   std::string GetString() const;

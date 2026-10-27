@@ -90,7 +90,7 @@ macOSの入力ソース設定の操作方法は[Apple公式ガイド](https://su
 - ハイフンなし7桁の郵便番号（例：`1000001`）を、既存の郵便番号辞書を使って住所へ変換可能。ライブ変換では数字表記を第1候補に保ち、キー設定の `ConvertNext`（次候補、標準では Space）で住所などの後続候補を選択可能
 - ライブ変換を使わない場合も、既定で初回の変換操作で第1候補のまま候補ウィンドウを開ける（設定で無効化可能）
 - ライブ変換は入力直後の不要な変換ちらつきを抑えるため、文字入力後に短いデバウンスを挟んで実行
-- ローマ字入力中、確定済みの読みの後ろに未解決のローマ字 suffix が残る間は、入力途中の一時的な Roman prefix ごとに passive suggestion を再計算して候補ウィンドウがちらつくのを抑えるため、直前まで表示していた候補を保持。suffix が解決した時点で更新を再開し、候補へ移動する場合も表示中の候補集合をそのまま使用
+- ローマ字入力中、単なる未解決の Roman suffix では直前の passive suggestion を保持して候補ウィンドウのちらつきを抑制。一方、カスタムローマ字規則の「曖昧なローマ字規則の途中表示」によって有効な読みが現れ、予測クエリが変化した場合は、suffix が未解決のままでもサジェストを更新。候補へ移動する場合は画面に表示中の候補集合を使用
 - 明示的に選んで確定したサジェストについて、候補が持つ全文の読みと、通常変換で検証できた文節・候補順位を使ってユーザーセグメント履歴の学習を補強。確定結果やサジェスト履歴は従来どおり維持し、検証できない文節や順位は推測で学習しない
 - デフォルトでは 1 文字だけの未確定文字列で、助詞などの誤変換を避けるためライブ変換を実行しない
 - `え~`、`えー`、`ん？` のような「かな1文字 + 装飾的な末尾記号」でも、短すぎる漢字化を避けるためライブ変換を抑制
@@ -257,7 +257,9 @@ Windows 版では、追加のオフライン防御層として、インストー
 
 また、`え~`、`えー`、`ん？` のように、かな1文字の後ろに装飾的な記号だけが続く場合もライブ変換を抑制します。これにより、入力途中の `え~` が `絵～` のように短すぎる漢字候補へ変換される挙動を避けます。
 
-サジェストについては、入力途中の未解決ローマ字によって候補が毎キー再生成され、候補ウィンドウが頻繁に更新・ちらつくのを抑えるため、ライブ変換とは別に passive suggestion の更新を一時的に HOLD します。確定済みの読みの後ろへ未解決のローマ字 suffix が付いた場合は、直前まで表示していた候補集合をそのまま保持し、suffix が解決するまで毎キーの prediction をやり直しません。たとえば `今日は` の後で `s`、`sh` と入力している間は同じ候補集合を維持し、`shi` が `し` に解決した時点で、現在の読み `今日はし` に対する suggestion を更新します。新しい composition の先頭だけは、`s` / `sh` のような短い未解決入力でも候補を出せるよう、最初の 2 文字までは refresh を許可します。
+サジェストについては、意味のある読みがまだ増えていない未解決ローマ字の打鍵ごとに候補を再生成し、候補ウィンドウがちらつくのを抑えるため、ライブ変換とは別に passive suggestion の更新を一時的に HOLD します。たとえば `今日は` の後で `s`、`sh` と入力している間は直前の候補集合を保持し、`shi` が `し` に解決すると、現在の読み `今日はし` に対するサジェストを更新します。新しい composition の先頭では、未解決のローマ字が 2 文字以下なら従来どおり更新を許可します。
+
+ただし、カスタムローマ字テーブルの「曖昧なローマ字規則の途中表示」（`DisplayAmbiguousResult`）が有効な規則では、後続の入力で変化する可能性のある未解決のローマ字でも、すでに有効な日本語の読みを表示できます。この状態で予測クエリが変化した場合は HOLD を解除し、新しい読みのサジェストを生成します。たとえば `a → あ`、`ms → ます`、`msn → ません` を持ち、`ms` と `msn` がさらに長い規則の接頭部分でもあるテーブルでは、`am` の候補は保持しますが、`ams` では `あます`、`amsn` では `あません` に対応して更新します。先頭からの `msn` のように未解決部分が 3 文字以上でも、同じ条件で更新できます。曖昧な読みが表示されない単なるローマ字 prefix については、従来の HOLD を維持します。
 
 保持中に Down / Tab で候補へ入る場合は、その時点で画面に表示されていた候補集合を再 prediction せずにそのままフォーカスします。Space は通常変換のままです。Shift による一時英字入力、modifier 付き入力、software / mobile keyboard からの明示的な text input はこの HOLD の対象にしません。ライブ変換と Zenz 自体は pending suffix 中も従来どおり継続します。
 
@@ -1027,7 +1029,7 @@ Main features added in this fork
 - Allows enabling/disabling live conversion and configuring its debounce delay and minimum start length from the config dialog
 - Supports seven-digit postal codes without a hyphen (for example, `1000001`) using existing postal dictionary entries; live conversion keeps the numeric literal first, and a key bound to `ConvertNext` (Space in the standard keymap) advances to later candidates
 - Applies live conversion after a short debounce delay to avoid noisy intermediate conversions
-- Reduces candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes after an already resolved reading; Mozkey holds the currently displayed suggestion list until the suffix resolves, then resumes refresh, and entering the list keeps the exact displayed candidates
+- Reduces candidate-window flicker by holding passive suggestions for unresolved Roman prefixes that do not change the prediction reading; when a custom DisplayAmbiguousResult rule exposes a meaningful reading and changes the prediction query, suggestions refresh even while the Roman suffix remains pending. Entering the candidate list uses the exact displayed candidates
 - For explicitly accepted suggestions, verifies the complete reading, native segment mapping, and actual normal-conversion candidate order before learning segment-level preferences; preserves the original committed text and suggestion history, and skips speculative learning when the mapping or displayed ranking cannot be verified
 - By default, suppresses live conversion for one-character compositions to avoid over-converting particles
 - Suppresses live conversion for very short kana compositions with decorative trailing symbols such as `え~`, `えー`, or `ん？`
@@ -1156,7 +1158,9 @@ To reduce distracting intermediate conversions, this fork applies live conversio
 
 Live conversion is also suppressed for very short kana compositions followed only by decorative trailing symbols, such as `え~`, `えー`, or `ん？`. This avoids noisy intermediate conversions such as `え~` becoming `絵～` while the user is still typing.
 
-To reduce candidate-window flicker caused by repeatedly recomputing passive suggestions for transient unresolved Roman prefixes, Mozkey temporarily holds passive-suggestion refresh separately from live conversion. When an already-resolved reading is followed by unresolved trailing Roman input, the suggestion list already visible on screen is kept instead of rerunning prediction on every key. For example, after `今日は`, typing `s` and then `sh` keeps the same suggestion set; when `shi` resolves to `し`, suggestions refresh for the current reading `今日はし`. At the start of a fresh composition, the first two unresolved Roman characters may still refresh so short prefixes such as `s` / `sh` can produce useful suggestions.
+To avoid candidate-window flicker from Roman keystrokes that do not yet add a meaningful reading, Mozkey temporarily holds passive-suggestion refresh separately from live conversion. For example, after `今日は`, typing `s` and then `sh` keeps the same suggestion set; when `shi` resolves to `し`, suggestions refresh for the current reading `今日はし`. At the start of a fresh composition, an unresolved Roman prefix of up to two characters can still refresh.
+
+Custom romaji rules with the `DisplayAmbiguousResult` option can display a meaningful Japanese reading even though their Roman suffix is still pending and may be extended by a longer rule. If that displayed ambiguous result changes the prediction query, Mozkey refreshes suggestions instead of holding the previous set. For example, with `a → あ`, `ms → ます`, and `msn → ません`, where `ms` and `msn` are also prefixes of longer rules, typing `am` keeps the prior suggestions, while `ams` refreshes for `あます` and `amsn` refreshes for `あません`. The same exception applies to `msn` at the start of a composition even though its pending Roman suffix is longer than two characters. Ordinary unresolved prefixes without a displayed ambiguous reading continue to use the previous HOLD behavior.
 
 While the list is held, Down / Tab focuses the exact displayed candidates without running prediction again. Space keeps the ordinary conversion path. Shift-triggered temporary ASCII input, modified key events, and explicit text input from software/mobile keyboards are excluded from this hold. Live conversion and Zenz processing continue normally while the Roman suffix is pending.
 

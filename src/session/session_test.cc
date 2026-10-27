@@ -5753,6 +5753,189 @@ TEST_F(SessionTest,
 }
 
 TEST_F(SessionTest,
+       DisplayedAmbiguousRomanResultRefreshesSuggestionAfterResolvedPrefix) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  auto table = std::make_shared<composer::Table>();
+  table->AddRule("a", "あ", "");
+  table->AddRuleWithAttributes("ms", "ます", "",
+                               composer::DISPLAY_AMBIGUOUS_RESULT);
+  table->AddRule("msg", "ますが", "");
+  session.SetTable(table);
+
+  Segments suggestion_a;
+  Segment* segment_a = suggestion_a.add_segment();
+  segment_a->set_key("あ");
+  AddCandidate("あ", "A suggestion", segment_a);
+
+  Segments suggestion_ams;
+  Segment* segment_ams = suggestion_ams.add_segment();
+  segment_ams->set_key("あます");
+  AddCandidate("あます", "AMSU suggestion", segment_ams);
+
+  Segments suggestion_amsg;
+  Segment* segment_amsg = suggestion_amsg.add_segment();
+  segment_amsg->set_key("あますが");
+  AddCandidate("あますが", "AMSG suggestion", segment_amsg);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(3)
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_a), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_ams), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_amsg), Return(true)));
+
+  Segments live_am;
+  Segment* live_am_segment = live_am.add_segment();
+  live_am_segment->set_key("あm");
+  AddCandidate("あm", "AM live", live_am_segment);
+
+  Segments live_ams;
+  Segment* live_ams_segment = live_ams.add_segment();
+  live_ams_segment->set_key("あます");
+  AddCandidate("あます", "AMSU live", live_ams_segment);
+
+  Segments live_amsg;
+  Segment* live_amsg_segment = live_amsg.add_segment();
+  live_amsg_segment->set_key("あますが");
+  AddCandidate("あますが", "AMSG live", live_amsg_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(3)
+      .WillOnce(DoAll(SetArgPointee<1>(live_am), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_ams), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_amsg), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("a", &session, &command));
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "A suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("m", &session, &command));
+  EXPECT_EQ(session.context().composer().GetQueryForPrediction(), "あ");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "A suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 2);
+  EXPECT_EQ(session.context().composer().GetQueryForPrediction(), "あます");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "AMSU suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("g", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 0);
+  EXPECT_EQ(session.context().composer().GetQueryForPrediction(), "あますが");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "AMSG suggestion");
+}
+
+TEST_F(SessionTest,
+       DisplayedAmbiguousRomanResultRefreshesBeyondTwoPendingLetters) {
+  MockEngine engine;
+  std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
+
+  Session session(engine);
+  InitSessionToPrecomposition(&session);
+
+  config::Config config;
+  config::ConfigHandler::GetDefaultConfig(&config);
+  config.set_preedit_method(config::Config::ROMAN);
+  config.set_use_live_conversion(true);
+  config.set_live_conversion_delay_msec(0);
+  config.set_live_conversion_min_key_length(2);
+  config.set_use_zenz_live_correction(false);
+  config.set_session_keymap(config::Config::MSIME);
+  session.SetConfig(config);
+
+  auto table = std::make_shared<composer::Table>();
+  table->AddRuleWithAttributes("ms", "ます", "",
+                               composer::DISPLAY_AMBIGUOUS_RESULT);
+  table->AddRuleWithAttributes("msn", "ません", "",
+                               composer::DISPLAY_AMBIGUOUS_RESULT);
+  table->AddRule("msna", "ますな", "");
+  session.SetTable(table);
+
+  Segments suggestion_m;
+  Segment* segment_m = suggestion_m.add_segment();
+  segment_m->set_key("m");
+  AddCandidate("m", "M suggestion", segment_m);
+
+  Segments suggestion_ms;
+  Segment* segment_ms = suggestion_ms.add_segment();
+  segment_ms->set_key("ます");
+  AddCandidate("ます", "MS suggestion", segment_ms);
+
+  Segments suggestion_msn;
+  Segment* segment_msn = suggestion_msn.add_segment();
+  segment_msn->set_key("ません");
+  AddCandidate("ません", "MSN suggestion", segment_msn);
+
+  EXPECT_CALL(*converter, StartPrediction(_, _))
+      .Times(3)
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_m), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_ms), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(suggestion_msn), Return(true)));
+
+  Segments live_ms;
+  Segment* live_ms_segment = live_ms.add_segment();
+  live_ms_segment->set_key("ます");
+  AddCandidate("ます", "MS live", live_ms_segment);
+
+  Segments live_msn;
+  Segment* live_msn_segment = live_msn.add_segment();
+  live_msn_segment->set_key("ません");
+  AddCandidate("ません", "MSN live", live_msn_segment);
+
+  EXPECT_CALL(*converter, StartConversion(_, _))
+      .Times(2)
+      .WillOnce(DoAll(SetArgPointee<1>(live_ms), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(live_msn), Return(true)));
+
+  commands::Command command;
+  ASSERT_TRUE(SendKey("m", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 1);
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "M suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("s", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 2);
+  EXPECT_EQ(session.context().composer().GetQueryForPrediction(), "ます");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "MS suggestion");
+
+  command.Clear();
+  ASSERT_TRUE(SendKey("n", &session, &command));
+  EXPECT_EQ(session.context().composer().GetPendingRomanInputLength(), 3);
+  EXPECT_EQ(session.context().composer().GetQueryForPrediction(), "ません");
+  ASSERT_TRUE(command.output().has_candidate_window());
+  EXPECT_EQ(command.output().candidate_window().candidate(0).value(),
+            "MSN suggestion");
+}
+
+TEST_F(SessionTest,
        DelayedLiveConversionDoesNotResurrectHiddenSuggestionOnPendingRoman) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter =
