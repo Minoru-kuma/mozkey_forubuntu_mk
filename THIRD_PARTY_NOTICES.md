@@ -43,17 +43,14 @@ notes.
 ### dic-nico-intersection-pixiv
 
 * Default source: [Niccori250k fork](https://github.com/Niccori250k/dic-nico-intersection-pixiv),
-  following the latest available `master` revision at each normal import.
+  at the pinned revision recorded in `tools/dictionary/locks/daily_sources.json`.
 * Original project: [ncaq/dic-nico-intersection-pixiv](https://github.com/ncaq/dic-nico-intersection-pixiv).
-  The importer also supports the original project's current `master` via `-Source ncaq`.
 * Used for: nico/pixiv delta dictionary
-* Provenance: each import resolves a single upstream commit and records its
-  revision and downloaded SHA-256 in a local generated source manifest.
-* License note: original and fork state that code is MIT licensed; this does
-  not itself establish redistribution rights for scraped dictionary contents.
-* Data note: upstream describes the dictionary as using data from Niconico
-  Encyclopedia and Pixiv Encyclopedia. Treat redistribution as review-required
-  because the generated data is derived from external web sources.
+* Provenance: the importer verifies the pinned revision, file size, and SHA-256,
+  and records the source details in a generated manifest.
+* License / generated output: both project READMEs state that the source code is
+  MIT-licensed and that the authors do not claim copyright over the generated
+  dictionary output.
 
 ### mozcdic-ut-personal-names
 
