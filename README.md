@@ -57,6 +57,12 @@ Windows 用のビルド済み MSI は [Releases](https://github.com/koyasi777/mo
 > 個人用 fork の experimental / pre-release build です。
 > MSI は署名されていないため、Windows の警告が表示される場合があります。
 
+### コード署名ポリシー（Code signing policy）
+
+現在公開しているWindows向けMSIインストーラーは**未署名**です。MozkeyはSignPath FoundationのOSS向け無料コード署名への申請を準備しています。現時点でSignPath Foundationの承認を得ている、または署名済みリリースを公開しているという意味ではありません。
+
+署名対象の予定、開発・承認の責任体制、プライバシー、およびリリースの検証方法については、[Code signing policy](CODE_SIGNING_POLICY.md)を参照してください。
+
 ### macOSでの初期設定（開発用PKG）
 
 現在、macOS用のビルド済みPKGはReleasesで公開していません。以下は、検証済みのインストール可能な開発用PKGを導入した場合の手順です。通常のOSSビルドで生成されるguarded PKGはインストールできません。ビルド条件については[macOS Zenz対応Universal PKGのビルド](#macos-zenz-対応-universal-pkg-のビルド)を参照してください。
@@ -1004,6 +1010,12 @@ Windows MSI packages are available from [Releases](https://github.com/koyasi777/
 > This build is not an official google/mozc distribution.
 > It is an experimental / pre-release build from a personal fork.
 > The MSI is not code-signed, so Windows may show a warning.
+
+### Code signing policy
+
+Mozkey's currently published Windows MSI installers are **unsigned**. The project is preparing an application for free open-source code signing through SignPath Foundation; no approval or signed release is implied at this stage.
+
+See the [Code signing policy](CODE_SIGNING_POLICY.md) for the proposed signing scope, project responsibilities, privacy disclosures, and release verification process.
 
 Main branches
 -------------
