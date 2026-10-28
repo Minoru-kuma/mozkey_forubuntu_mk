@@ -44,10 +44,10 @@
   "macos": {
     "upstream": {
       "repository": "https://github.com/ggml-org/llama.cpp.git",
-      "tag": "b10268",
-      "commit": "6b5224cfccdb9caf4c0a0a87692fddad22c7e969"
+      "tag": "v0.7.0",
+      "commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab"
     },
-    "patched_vocab_sha256": "36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317",
+    "patched_vocab_sha256": "3a65249edbcaf4a21742e44f89a2be810a75e53c892bb5905e1a5dc71227184d",
     "patched_main_sha256": "2197ffc83775b865b97b35528a99f1daa692cf25eb4e952509e46e2cfebbf976",
     "minimum_os": "12.0",
     "architectures": "x86_64,arm64"

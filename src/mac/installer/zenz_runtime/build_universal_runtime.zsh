@@ -6,10 +6,10 @@ setopt pipe_fail
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${PATH:-}"
 
 LLAMA_REPOSITORY="https://github.com/ggml-org/llama.cpp.git"
-LLAMA_TAG="b10268"
-LLAMA_COMMIT="6b5224cfccdb9caf4c0a0a87692fddad22c7e969"
+LLAMA_TAG="v0.7.0"
+LLAMA_COMMIT="620d2225cc436ab0b001e3200e590e3b286ef9ab"
 PATCH_SHA256="6db5c11b2da8415d6b37200ec6aa4f3fdcdde8efb1e7a71375fe331a7b0e829a"
-PATCHED_SOURCE_SHA256="36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317"
+PATCHED_SOURCE_SHA256="3a65249edbcaf4a21742e44f89a2be810a75e53c892bb5905e1a5dc71227184d"
 DUAL_LIVENESS_PATCH_SHA256="3267e978f61456c32dfb83b15bf0f3a75393c5f98c946ee7a2846f7121b36dda"
 DUAL_LIVENESS_MAIN_SHA256="2197ffc83775b865b97b35528a99f1daa692cf25eb4e952509e46e2cfebbf976"
 
@@ -286,19 +286,24 @@ cmake \
   -S "$source_dir" \
   -B "$x86_build" \
   -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
-  -DHOST_CXX_COMPILER=/usr/bin/c++ \
   "${COMMON_ARGS[@]}" \
   2>&1 |
   /usr/bin/tee "$logs/configure-x86_64.log"
 
-/usr/bin/grep -F \
-  'UI: building llama-ui-embed with host compiler' \
-  "$logs/configure-x86_64.log" \
-  >/dev/null ||
-  die "x86_64 host-helper cross-build path was not activated"
+# llama.cpp v0.7.0 provisions ui.cpp/ui.h with CMake at build time;
+# the former native host-helper path no longer exists. Keep UI provisioning
+# disabled and offline in both architecture-specific CMake caches.
+for build_dir in "$arm_build" "$x86_build"; do
+  cache="$build_dir/CMakeCache.txt"
+  [[ -f "$cache" ]] || die "Missing CMake cache: $cache"
+  for option in LLAMA_BUILD_UI LLAMA_USE_PREBUILT_UI; do
+    /usr/bin/grep -Eq "^${option}:(BOOL|UNINITIALIZED)=OFF$" "$cache" ||
+      die "Offline UI option is not OFF: $option in $build_dir"
+  done
+done
 
 /usr/bin/grep -F \
-  'LLAMA_COMMIT = "6b5224c"' \
+  'LLAMA_COMMIT = "620d222"' \
   "$arm_build/common/build-info.cpp" \
   >/dev/null ||
   die "arm64 build-info commit mismatch"
@@ -310,7 +315,7 @@ cmake \
   die "arm64 build-info target mismatch"
 
 /usr/bin/grep -F \
-  'LLAMA_COMMIT = "6b5224c"' \
+  'LLAMA_COMMIT = "620d222"' \
   "$x86_build/common/build-info.cpp" \
   >/dev/null ||
   die "x86_64 build-info commit mismatch"
@@ -364,13 +369,14 @@ cmake \
 
 arm="$arm_build/bin/llama-server"
 x86="$x86_build/bin/llama-server"
-host_helper="$x86_build/tools/ui/llama-ui-embed-host"
-
-[[ -f "$host_helper" ]] ||
-  die "x86_64 build host helper missing"
-
-[[ "$(/usr/bin/lipo -archs "$host_helper")" == "arm64" ]] ||
-  die "x86_64 build host helper is not arm64"
+# The server's llama-ui target depends on CMake's generated UI sources.
+# Verify generation independently for both target architectures before lipo.
+for build_dir in "$arm_build" "$x86_build"; do
+  for generated in ui.cpp ui.h; do
+    [[ -s "$build_dir/tools/ui/$generated" ]] ||
+      die "Missing CMake-generated $generated in $build_dir"
+  done
+done
 
 audit_thin "$arm" arm64
 audit_thin "$x86" x86_64

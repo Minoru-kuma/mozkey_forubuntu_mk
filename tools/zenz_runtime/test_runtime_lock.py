@@ -24,8 +24,11 @@ class RuntimeLockTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(json.dumps(self.data), encoding="utf-8")
             loaded = rl.read_lock(root)
-            self.assertEqual(loaded["windows"]["upstream"]["tag"], "v0.7.0")
-            self.assertEqual(loaded["macos"]["upstream"]["tag"], "b10268")
+            self.assertEqual(loaded["windows"]["upstream"], self.data["windows"]["upstream"])
+            self.assertEqual(loaded["macos"]["upstream"], self.data["macos"]["upstream"])
+            self.assertIsNot(loaded["windows"]["upstream"], loaded["macos"]["upstream"])
+            loaded["macos"]["upstream"]["tag"] = "independent-macos-test-tag"
+            self.assertEqual(loaded["windows"]["upstream"], self.data["windows"]["upstream"])
 
     def test_reject_moving_revision_and_unknown_patch(self):
         changed = copy.deepcopy(self.data)
@@ -69,17 +72,26 @@ class RuntimeLockTests(unittest.TestCase):
 
     def test_mac_generated_build_info_pin_is_checked_twice(self):
         rule = next(r for r in rl.rules(self.data) if r.label == "macOS build-info short commit")
-        text = "'LLAMA_COMMIT = \"6b5224c\"'\n'LLAMA_COMMIT = \"6b5224c\"'\n"
+        short = self.data["macos"]["upstream"]["commit"][:7]
+        one = f"'LLAMA_COMMIT = \"{short}\"'\n"
+        text = one * 2
         _, issues = rl.apply_rules(text, [rule], write=False)
         self.assertEqual(issues, [])
-        text = text.replace("6b5224c", "1111111", 1)
-        _, issues = rl.apply_rules(text, [rule], write=False)
+        invalid = "0000000" if short != "0000000" else "1111111"
+        stale = text.replace(short, invalid, 1)
+        _, issues = rl.apply_rules(stale, [rule], write=False)
         self.assertEqual(len(issues), 1)
+        self.assertIn("stale", issues[0])
+        repaired, issues = rl.apply_rules(stale, [rule], write=True)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(repaired, text)
 
     def test_missing_duplicate_consumer_fails_closed(self):
         rule = next(r for r in rl.rules(self.data) if r.label == "macOS build-info short commit")
-        text = "'LLAMA_COMMIT = \"6b5224c\"'\n"
-        _, issues = rl.apply_rules(text, [rule], write=True)
+        short = self.data["macos"]["upstream"]["commit"][:7]
+        text = f"'LLAMA_COMMIT = \"{short}\"'\n"
+        updated, issues = rl.apply_rules(text, [rule], write=True)
+        self.assertEqual(updated, text)
         self.assertEqual(len(issues), 1)
         self.assertIn("expected 2 matches", issues[0])
 

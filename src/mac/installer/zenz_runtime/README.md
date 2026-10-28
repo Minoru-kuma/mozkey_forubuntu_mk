@@ -35,10 +35,10 @@ Repository:
 https://github.com/ggml-org/llama.cpp.git
 
 Tag:
-b10268
+v0.7.0
 
 Commit:
-6b5224cfccdb9caf4c0a0a87692fddad22c7e969
+620d2225cc436ab0b001e3200e590e3b286ef9ab
 ```
 
 Mozkey applies the tracked compatibility patch:
@@ -52,7 +52,7 @@ SHA-256:
 The patched `src/llama-vocab.cpp` identity is:
 
 ```text
-36d8d6db0603a511ea4a490a8f0da28e2054327e3d4fe9b9e1481a2150eb1317
+3a65249edbcaf4a21742e44f89a2be810a75e53c892bb5905e1a5dc71227184d
 ```
 
 The patch classifies the model tokenizer pre-tokenizer
@@ -127,10 +127,13 @@ LLAMA_USE_SYSTEM_GGML=OFF
 
 For the x86_64 build on an Apple Silicon host, the builder explicitly enters
 CMake cross-compiling mode with `CMAKE_SYSTEM_NAME=Darwin`,
-`CMAKE_SYSTEM_PROCESSOR=x86_64`,
-`CMAKE_OSX_ARCHITECTURES=x86_64`, and
-`HOST_CXX_COMPILER=/usr/bin/c++`. Build-time helpers therefore execute as host
-arm64 binaries while the final thin runtime is x86_64.
+`CMAKE_SYSTEM_PROCESSOR=x86_64`, and
+`CMAKE_OSX_ARCHITECTURES=x86_64`. In llama.cpp v0.7.0, the former
+`llama-ui-embed-host` helper is no longer built. CMake generates
+`tools/ui/ui.cpp` and `tools/ui/ui.h` for each architecture, with
+`LLAMA_BUILD_UI=OFF` and `LLAMA_USE_PREBUILT_UI=OFF` to avoid UI builds and
+prebuilt UI downloads. The formal builder checks both CMake caches and
+both generated source pairs before combining the arm64 and x86_64 binaries.
 
 Create a fresh runtime output directory:
 
@@ -334,5 +337,7 @@ For a re-pin:
 7. require the same final package artifact to pass the dual-native package gate
    before accepting the new pin.
 
-The currently pinned b10268 / `6b5224cfccdb9caf4c0a0a87692fddad22c7e969`
-runtime remains the known-good baseline until such a re-pin completes.
+The previously validated b10268 / `6b5224cfccdb9caf4c0a0a87692fddad22c7e969` runtime remains
+the macOS known-good release baseline until the v0.7.0 Universal build
+and dual-native package gates pass. The source pin above describes the
+v0.7.0 development target, not a validated distributable runtime.
