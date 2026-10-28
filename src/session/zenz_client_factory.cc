@@ -29,14 +29,11 @@
 
 namespace mozc {
 namespace session {
-namespace {
 
 #if defined(__APPLE__) && TARGET_OS_OSX
-
-constexpr char kZenzRuntimeDirectory[] = "ZenzRuntime";
-constexpr char kZenzScorerExecutable[] = "mozc_zenz_scorer";
-constexpr auto kScorerLaunchThrottle = std::chrono::seconds(2);
-
+// Testable implementation shared by the production scorer launcher and the
+// macOS regression test. Do not alter child ownership or SIGCHLD handling.
+namespace internal {
 // MozcConverter is the scorer's parent and lives for the whole login session.
 // The scorer can exit on its own (startup failure, losing the singleton lock
 // to an already running scorer, or a crash), so it must be reaped here or it
@@ -52,6 +49,17 @@ void ReapScorerAsync(pid_t pid) {
     LOG(ERROR) << "Failed to start the Zenz scorer reaper: " << e.what();
   }
 }
+
+}  // namespace internal
+#endif  // __APPLE__ && TARGET_OS_OSX
+
+namespace {
+
+#if defined(__APPLE__) && TARGET_OS_OSX
+
+constexpr char kZenzRuntimeDirectory[] = "ZenzRuntime";
+constexpr char kZenzScorerExecutable[] = "mozc_zenz_scorer";
+constexpr auto kScorerLaunchThrottle = std::chrono::seconds(2);
 
 bool LaunchMacZenzScorer() {
   // MozcConverter is normally a singleton, but several Zenz worker requests
@@ -79,7 +87,7 @@ bool LaunchMacZenzScorer() {
     return false;
   }
   if (pid > 0) {
-    ReapScorerAsync(static_cast<pid_t>(pid));
+    internal::ReapScorerAsync(static_cast<pid_t>(pid));
   }
 
   has_launched = true;
