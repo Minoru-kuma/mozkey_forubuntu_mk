@@ -3,10 +3,10 @@
 ## Source identity
 
 - llama.cpp repository: https://github.com/ggml-org/llama.cpp
-- tag: `b10437`
-- commit: `16d222fc5ead59d20039501a37251c9ed457a454`
+- tag: `v0.7.0`
+- commit: `620d2225cc436ab0b001e3200e590e3b286ef9ab`
 - tokenizer compatibility patch SHA256: `6DB5C11B2DA8415D6B37200EC6AA4F3FDCDDE8EFB1E7A71375FE331A7B0E829A`
-- patched `src/llama-vocab.cpp` SHA256: `7E07061170256C9F5A5ACF6AE30D5C6E5A0CBB89D706EEDAE95AC5F9B46230F1`
+- patched `src/llama-vocab.cpp` SHA256: `2CEF3BDD758D9F2EB4CB80C1FC149C75461E9E32AF06E03D67D99E36FF69BBED`
 
 ## Model identity
 
@@ -19,27 +19,22 @@
 
 - source-tree file: `x64/llama-server.exe`
 - PE: x64 / 0x8664
-- SHA256: `FE9015591099ACDA45A37D8D8D83C1B1EABA9305CE3FFAA6B3808F9FA2953251`
-- W1 canonical Zenz-v3 semantic differential: 12/12 tokenizer, first-token, cache-off, and production-like equality against the previous runtime.
+- SHA256: `35B953C97F870CBD7426DC865783BE36090F841C273AE779BD098E9F080F3735`
 
 ### ARM64
 
 - source-tree file: `arm64/llama-server.exe`
 - PE: ARM64 / 0xAA64
-- SHA256: `0ACD17D6EE5E361AFC06A7DCCD06EF012A00669546535889B874D5C3BB3DE81B`
-- build basis: upstream `arm64-windows-llvm+static-release` preset with Clang target `arm64-pc-windows-msvc`
-- local cross-build structural gate: PASS
-- historical W1 candidate native GitHub ARM64 gate: PASS
-  - this validated the exact ARM64 runtime candidate before MSI integration
-  - workflow run: https://github.com/koyasi777/mozkey/actions/runs/31893874478
-  - workflow commit: `daa13a4df3c4b2ce4da5a51dcb2a29aa3f7f248f`
-- exact final-MSI native validation: PASS
-  - CI job: `Native ARM64 installed MSI Zenz audit`
-  - the exact same-run ARM64 MSI is installed on native `windows-11-arm`
-  - installed `llama-server.exe` is ARM64 and matches the fixed runtime SHA256
-  - installed `mozc_zenz_scorer.exe` is ARM64
-  - the installed model matches the fixed model SHA256
-  - native `llama-server --version`, the canonical 12-case semantic gate, and the scorer named-pipe context gate pass from installed files
+- SHA256: `6BDE0FAF466261C8233298ECB2BDF01A78AAEBE9729C03BA4EA95F045F772737`
+
+## Build provenance and compatibility
+
+- Windows x64 **rebuilt** isolated MSVC candidate SHA256: `35B953C97F870CBD7426DC865783BE36090F841C273AE779BD098E9F080F3735`. This is not a claim of binary identity with earlier unavailable experimental builds.
+- Windows x64 applies the tracked tokenizer compatibility patch and dual-liveness patch.
+- Portable ARM64 candidate SHA256: `6BDE0FAF466261C8233298ECB2BDF01A78AAEBE9729C03BA4EA95F045F772737`.
+- Windows ARM64 applies the tracked tokenizer patch, but not the dual-liveness patch. Build on native ARM64 with ClangCL, `GGML_NATIVE=OFF`, and `GGML_CPU_ARM_ARCH=armv8-a`; audit normal and delay-load PE imports for OS/UCRT/VC runtime dependencies.
+- The upstream source must contain the verified chat-PEG parser security fix. Changes to patch scope, architecture or portability require review.
+- The authoritative revision, model, patch and binary hashes are in `src/zenz_runtime/llama_runtime.lock.json`; this document is a checked consumer. After a validated update, synchronize with `python tools/zenz_runtime/runtime_lock.py sync --write --diff` and run `check`.
 
 ## Build/runtime policy
 
@@ -68,38 +63,36 @@
 
 ## Installed security gate
 
-The final ARM64 MSI is also validated on native `windows-11-arm` with the
-installed payload, not source-tree binaries:
+Before promoting a Windows runtime, test the **installed MSI payload**, not only repository binaries:
 
-- the seven Mozc outbound/block Windows Firewall rules are installed and point
-  to the actual installed executables
-- the Zenz scorer-to-llama path continues to pass with the firewall rules enabled
-- scorer-owned `llama-server.exe` listens on loopback only
-- scorer / llama have no non-loopback TCP connection during the audit
-- uninstall removes the Zenz payload and the Mozc firewall rules
+- All seven Mozc outbound/block Windows Firewall rules must be installed, enabled, and point to the installed executables.
+- The installed scorer-to-llama inference path must work with these rules enabled.
+- `llama-server.exe` must listen on loopback only; scorer and llama must have no non-loopback TCP connections in the audit. Never expose generated API keys in evidence.
+- Native architecture, file hashes, model loading, access control and installed scorer context must be verified for each supported MSI architecture.
+- Final uninstall must remove Zenz payload and Mozc firewall rules.
 
 ## Installer lifecycle gate
 
-The native ARM64 lifecycle audit rebuilds the W2-predecessor package from the
-audited baseline commit `c986db2c611c7255ba92b1d44fc6ac3fb6b098bf` and verifies
-a normal MSI lifecycle on native `windows-11-arm`:
+Verify normal Windows Installer behavior **without first uninstalling the predecessor**:
 
-- the predecessor contains the historical x64 `llama-server.exe` and the four
-  legacy ggml / llama DLLs
-- installing the current MSI over that predecessor replaces the ProductCode
-  while preserving the Mozc UpgradeCode
-- the upgraded payload contains the native ARM64 llama/scorer runtime
-- the four legacy runtime DLLs are removed
-- the post-upgrade scorer context E2E gate passes
-- a second install of the exact current MSI does not duplicate firewall rules
-- final uninstall removes product registration, Zenz payload, and firewall rules
-- forced `REINSTALL=ALL REINSTALLMODE=amus` is not part of the normal lifecycle
-  contract
+- A published release must increase MSI `ProductVersion` over the preceding public release; use a new `ProductCode` and preserve the Mozc `UpgradeCode`.
+- A normal `msiexec /i` upgrade must replace the installed runtime with the pinned binary, remove obsolete ggml/llama DLLs, preserve the functional scorer path, and leave no old product registration.
+- Repeat-install of the exact current MSI must not duplicate firewall rules.
+- Final uninstall must clean product registration, payload and firewall rules.
+- Development CI artifacts may have the same `ProductVersion` when testing upgrade mechanics; do not treat that as meeting the public release versioning requirement.
+- Forced `REINSTALL=ALL REINSTALLMODE=amus` is not part of the normal upgrade contract.
+- Include a Windows x64 installed-IME / Zenz ON/OFF smoke test and ARM64 native installed-MSI and lifecycle tests where supported; preserve any untested limitations in evidence.
 
-Development CI artifacts can have the same ProductVersion while validating the
-upgrade mechanics. A published release must increase ProductVersion relative to
-the previous published release, use a new ProductCode, and preserve the Mozc
-UpgradeCode.
+## Quality and release validation gate
+
+- Compare a pinned old runtime and the proposed new runtime against the same Japanese-conversion test corpus, recording reference-exact results, output differences and latency.
+- Review each changed output for meaning and correctness; do not infer universal accuracy from a fixed evaluation sample. Investigate unexpected regressions before promotion.
+- Record the exact CI run, package SHA256, version/architecture, installed MSI upgrade results, and known limitations in a **version-specific report**, not in this contract.
+- Keep the canonical runtime hashes in the lock and make them pass the read-only CI gate.
+
+## Validation reports
+
+- [Windows llama.cpp v0.7.0 integration evidence](../../../../docs/validation/llama-cpp-v0.7.0-windows.md)
 
 ## Current install-directory compatibility note
 

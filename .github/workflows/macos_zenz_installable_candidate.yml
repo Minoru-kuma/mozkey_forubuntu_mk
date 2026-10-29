@@ -1,0 +1,246 @@
+name: macOS Zenz installable candidate (no installation)
+
+on:
+  push:
+    branches:
+      - ci/llama-v070-arm64-native
+    paths:
+      - '.github/workflows/macos_zenz_installable_candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_installable_candidate_arm64:
+    name: Build separate installable candidate and inspect packaged preinstall
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - name: Checkout source without persisted credentials
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Confirm native Apple Silicon and source identity
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          test "$(/usr/bin/uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          /usr/bin/sw_vers
+          bazelisk version
+          echo "INSTALLABLE_CANDIDATE_SOURCE=$GITHUB_SHA"
+
+      - name: Run 27 isolated macOS installer preflight fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 src/mac/preflight_mozkey_release_test.py
+
+      - name: Prepare daily dictionary
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: utf-8
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/dictionary/prepare_daily_dictionary.ps1
+
+      - name: Restore dependency cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: zenz-formal-update-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install dependencies
+        working-directory: ./src
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 build_tools/update_deps.py
+
+      - name: Build Universal Qt
+        working-directory: ./src
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 build_tools/build_qt.py --release --confirm_license --macos_cpus=x86_64,arm64
+
+      - name: Build and stage source-pinned Universal Zenz runtime
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          RUNTIME="$RUNNER_TEMP/mozkey-zenz-installable-candidate-runtime"
+          test ! -e "$RUNTIME"
+          src/mac/installer/zenz_runtime/build_universal_runtime.zsh "$RUNTIME"
+          src/mac/installer/zenz_runtime/stage_runtime_assets.zsh "$RUNTIME"
+
+      - name: Build separate installable candidate PKG (never install in CI)
+        working-directory: ./src
+        shell: bash
+        run: |
+          set -euo pipefail
+          bazelisk \
+            --output_user_root="$HOME/.cache/bazel_mozkey_zenz_installable_candidate" \
+            build \
+            --config=oss_macos \
+            --config=release_build \
+            --macos_cpus=x86_64,arm64 \
+            --define=macos_zenz_runtime=1 \
+            --define=MOZKEY_INSTALLABLE=1 \
+            //mac:package \
+            --verbose_failures
+
+      - name: Capture package and source-build contract
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/installable-candidate"
+          mkdir -p "$OUT"
+          install -m 0644 src/bazel-bin/mac/Mozc.pkg \
+            "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg"
+          install -m 0644 src/mac/installer/zenz_runtime/BUILD-CONTRACT.txt \
+            "$OUT/BUILD-CONTRACT.txt"
+          PKG_SHA="$(/usr/bin/shasum -a 256 "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" | /usr/bin/awk '{print $1}')"
+          CONTRACT_SHA="$(/usr/bin/shasum -a 256 "$OUT/BUILD-CONTRACT.txt" | /usr/bin/awk '{print $1}')"
+          {
+            echo "source_commit=$GITHUB_SHA"
+            echo "package_sha256=$PKG_SHA"
+            echo "build_contract_sha256=$CONTRACT_SHA"
+            echo "candidate_type=explicit-installable-unsigned-development"
+          } > "$OUT/ARTIFACT-CONTRACT.txt"
+          cat "$OUT/ARTIFACT-CONTRACT.txt"
+
+      - name: Verify exact package and packaged native scorer on Apple Silicon
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/installable-candidate"
+          MOZKEY_ZENZ_EXPECTED_CONTRACT="$OUT/BUILD-CONTRACT.txt" \
+          MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_installable_candidate" \
+            src/mac/installer/zenz_runtime/verify_release_package.zsh \
+            "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" \
+            "$OUT/arm64-verify"
+          install -m 0644 "$OUT/arm64-verify/audit.txt" "$OUT/arm64-audit.txt"
+
+      - name: Fail closed unless actual packaged preinstall is the release script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCHK'
+          import hashlib
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          out = Path('installable-candidate')
+          unpacked = out / 'arm64-verify' / 'expanded'
+          expected = Path('src/bazel-bin/mac/preflight.sh')
+          preinstall = list(unpacked.rglob('preinstall'))
+          assert len(preinstall) == 1 and preinstall[0].is_file(), f'Expected one packaged preinstall, got {preinstall}'
+          assert expected.is_file(), 'Missing Bazel-generated source preflight'
+          source = expected.read_bytes()
+          packaged = preinstall[0].read_bytes()
+          assert source == packaged, 'Packaged preinstall differs from Bazel-generated preflight'
+          text = packaged.decode('utf-8')
+          assert "_mozkey_target='100.7.7'" in text, 'Unexpected resolved Mozkey installer version'
+          assert "_mozkey_pkg_id='org.mozc.pkg.JapaneseInput'" in text, 'Unexpected receipt identity'
+          assert '_mozkey_valid_pkg_version' in text, 'Release preflight checks missing'
+          assert 'stage-1 PKG is NOT INSTALLABLE' not in text, 'Stage-1 guard unexpectedly packaged'
+          assert '@@@MOZKEY_INSTALL_VERSION@@@' not in text, 'Version placeholder not resolved'
+          package_infos = [p for p in unpacked.rglob('PackageInfo') if p.is_file()]
+          assert len(package_infos) == 1, f'Expected one component PackageInfo, got {package_infos}'
+          root = ET.parse(package_infos[0]).getroot()
+          assert root.attrib.get('identifier') == 'org.mozc.pkg.JapaneseInput', root.attrib
+          assert root.attrib.get('version') == '100.7.7', root.attrib
+          sha = hashlib.sha256(packaged).hexdigest()
+          report = out / 'PREINSTALL-AUDIT.txt'
+          report.write_text('PACKAGED_RELEASE_PREFLIGHT=PASS\nPACKAGE_RECEIPT_VERSION=100.7.7\nPREINSTALL_SOURCE_SHA256=' + sha + '\nPHYSICAL_INSTALL=NOT_PERFORMED\n', encoding='utf-8')
+          print(report.read_text())
+          PYCHK
+
+      - name: Upload isolated installable candidate (not signed or notarized)
+        uses: actions/upload-artifact@v6
+        with:
+          name: mozkey-zenz-installable-candidate-unsigned-dev
+          path: |
+            installable-candidate/Mozc_Zenz_Universal_installable_candidate.pkg
+            installable-candidate/BUILD-CONTRACT.txt
+            installable-candidate/ARTIFACT-CONTRACT.txt
+            installable-candidate/PREINSTALL-AUDIT.txt
+            installable-candidate/arm64-audit.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  verify_same_candidate_on_native_intel:
+    name: Verify identical installable candidate on native Intel (without installing)
+    needs: build_installable_candidate_arm64
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - name: Checkout identical source
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Download exact candidate
+        uses: actions/download-artifact@v6
+        with:
+          name: mozkey-zenz-installable-candidate-unsigned-dev
+          path: installable-candidate
+
+      - name: Verify x86_64 and artifact identity
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          test "$(/usr/bin/uname -m)" = x86_64
+          OUT="$GITHUB_WORKSPACE/installable-candidate"
+          CONTRACT="$OUT/ARTIFACT-CONTRACT.txt"
+          EXPECTED_SHA="$(/usr/bin/awk -F= '$1 == "package_sha256" {print $2}' "$CONTRACT")"
+          SOURCE_SHA="$(/usr/bin/awk -F= '$1 == "source_commit" {print $2}' "$CONTRACT")"
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "${#EXPECTED_SHA}" -eq 64
+          test "$(/usr/bin/shasum -a 256 "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" | /usr/bin/awk '{print $1}')" = "$EXPECTED_SHA"
+          echo "SAME_INSTALLABLE_CANDIDATE=PASS"
+
+      - name: Restore dependency cache
+        uses: actions/cache@v5
+        with:
+          path: src/third_party_cache
+          key: zenz-formal-update-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install dependencies for native verifier probe
+        working-directory: ./src
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 build_tools/update_deps.py
+
+      - name: Verify same package and native scorer on Intel
+        shell: /bin/zsh {0}
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/installable-candidate"
+          MOZKEY_ZENZ_EXPECTED_CONTRACT="$OUT/BUILD-CONTRACT.txt" \
+          MOZKEY_ZENZ_VERIFY_BAZEL_ROOT="$HOME/.cache/bazel_mozkey_zenz_installable_intel_verify" \
+            src/mac/installer/zenz_runtime/verify_release_package.zsh \
+            "$OUT/Mozc_Zenz_Universal_installable_candidate.pkg" \
+            "$OUT/intel-verify"
+          install -m 0644 "$OUT/intel-verify/audit.txt" "$OUT/intel-audit.txt"
+
+      - name: Upload native Intel audit
+        uses: actions/upload-artifact@v6
+        with:
+          name: mozkey-zenz-installable-candidate-intel-audit
+          path: |
+            installable-candidate/ARTIFACT-CONTRACT.txt
+            installable-candidate/PREINSTALL-AUDIT.txt
+            installable-candidate/intel-audit.txt
+          if-no-files-found: error
+          retention-days: 7

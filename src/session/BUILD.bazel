@@ -260,7 +260,11 @@ mozc_cc_test(
     deps = [
         ":session",
         "//testing:gunit_main",
-    ],
+    ] + mozc_select(
+        macos = [
+            "//base:process",
+        ],
+    ),
 )
 
 mozc_cc_test(
