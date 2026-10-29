@@ -8492,6 +8492,19 @@ bool Session::InsertCharacter(commands::Command* command) {
       should_hold_pending_roman_suggestion =
           ShouldHoldSuggestionForPendingRoman(
               composer_after_insert_for_suggestion);
+
+      // An ambiguous Roman prefix can already represent a usable reading.
+      // Refresh when DisplayAmbiguousResult changes the prediction query,
+      // even if the Roman input is still pending (e.g. am -> ams).
+      // Keep HOLD for raw incomplete Roman input such as a -> am, or
+      // for long alphabet-only prefixes such as lt -> lts.
+      if (should_hold_pending_roman_suggestion &&
+          composer_after_insert_for_suggestion
+              .HasTrailingDisplayedAmbiguousRomanResult() &&
+          context_->composer().GetQueryForPrediction() !=
+              composer_after_insert_for_suggestion.GetQueryForPrediction()) {
+        should_hold_pending_roman_suggestion = false;
+      }
     }
     if (should_hold_pending_roman_suggestion) {
       CaptureVisiblePassiveSuggestionSnapshot(

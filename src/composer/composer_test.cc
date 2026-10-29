@@ -136,6 +136,32 @@ class ComposerTest : public ::testing::Test {
   std::shared_ptr<Config> config_;
 };
 
+TEST_F(ComposerTest, DisplayedAmbiguousRomanResultIsSemanticState) {
+  config_->set_preedit_method(Config::ROMAN);
+  table_->AddRule("a", "あ", "");
+  table_->AddRuleWithAttributes("ms", "ます", "",
+                                DISPLAY_AMBIGUOUS_RESULT);
+  table_->AddRuleWithAttributes("msn", "ません", "",
+                                DISPLAY_AMBIGUOUS_RESULT);
+  table_->AddRule("msna", "ますな", "");
+
+  ASSERT_TRUE(InsertKey("a", composer_.get()));
+  EXPECT_FALSE(composer_->HasTrailingDisplayedAmbiguousRomanResult());
+  ASSERT_TRUE(InsertKey("m", composer_.get()));
+  EXPECT_FALSE(composer_->HasTrailingDisplayedAmbiguousRomanResult());
+  EXPECT_EQ(composer_->GetQueryForPrediction(), "あ");
+  ASSERT_TRUE(InsertKey("s", composer_.get()));
+  EXPECT_TRUE(composer_->HasTrailingDisplayedAmbiguousRomanResult());
+  EXPECT_EQ(composer_->GetQueryForPrediction(), "あます");
+  ASSERT_TRUE(InsertKey("n", composer_.get()));
+  EXPECT_EQ(composer_->GetPendingRomanInputLength(), 3);
+  EXPECT_TRUE(composer_->HasTrailingDisplayedAmbiguousRomanResult());
+  EXPECT_EQ(composer_->GetQueryForPrediction(), "あません");
+  ASSERT_TRUE(InsertKey("a", composer_.get()));
+  EXPECT_FALSE(composer_->HasTrailingDisplayedAmbiguousRomanResult());
+  EXPECT_EQ(composer_->GetQueryForPrediction(), "あますな");
+}
+
 TEST_F(ComposerTest, Reset) {
   composer_->InsertCharacter("mozuku");
 

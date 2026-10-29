@@ -252,6 +252,10 @@ bool Composition::IsTrailingPendingInputAtCompositionStart() const {
   return !chunk.pending().empty() && chunk.conversion().empty();
 }
 
+bool Composition::HasTrailingDisplayedAmbiguousResult() const {
+  return !chunks_.empty() && chunks_.back().HasDisplayedAmbiguousResult();
+}
+
 size_t Composition::GetTrailingPendingDisplayLength() const {
   if (chunks_.empty()) {
     return 0;
