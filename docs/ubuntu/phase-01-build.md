@@ -4,14 +4,14 @@
 [共通ルール](../../AGENTS.md) / [進捗・承認](../../PLANS.md) / [調査](phase-00-audit.md)
 
 ## 目的・開始条件
-Ubuntu 26系 x86_64 + IBus向け通常成果物を再現可能にビルドし、Ubuntu 24.04 CIとの相違を明らかにする。まずユーザーが利用予定の正確な版（26.04/26.10等）、Desktop環境、Wayland/X11、CPU/RAM/空き容量を確定する。OS版は/etc/os-release、アーキテクチャはuname -mで記録する。24.04は比較用であり、主対象の代替合格にはしない。
-Phase 0レビューとPhase 1の明示承認、依存取得の容量・ネットワーク範囲の合意を開始条件とする。Zenz、モデル取得、IBus登録・切替、システム導入は範囲外。ソース修正が必要になった場合は調査結果と修正案を先に提示する。
+Ubuntu 26.04 LTS（x86_64）+ Fcitx5を第一対象として、通常Linux成果物を再現可能にビルドし、Fcitx5統合差分・依存・ビルド構成を調査し、Ubuntu 24.04 CIとの相違を明らかにする。対象OSは確定済み。利用予定のDesktop環境、Wayland/X11、CPU/RAM/空き容量を確定する。OS版は/etc/os-release、アーキテクチャはuname -mで記録する。24.04は比較用であり、主対象の代替合格にはしない。
+Phase 0レビューとPhase 1の明示承認、依存取得の容量・ネットワーク範囲の合意を開始条件とする。Zenz、モデル取得、Fcitx5/IBus登録・切替、システム導入は範囲外。ソース修正が必要になった場合は調査結果と修正案を先に提示する。
 
 ## 環境と依存の案
-使い捨てVMまたはコンテナ等の隔離ビルド環境を優先し、ホストの既存Mozcへ影響させない。対象SHA、イメージ版/digest、全ツール版、依存解決結果を記録する。
+使い捨てVMまたはコンテナ等の隔離ビルド環境を優先し、ホストの日常Fcitx5・既存Mozcへ影響させない。対象SHA、イメージ版/digest、全ツール版、依存解決結果を記録する。
 - CIに明示されたパッケージ：libibus-1.0-dev、qt6-base-dev。
 - 開発環境で確認するもの：GCC/G++（build-essential相当）、pkg-config、Git、Python 3、zip/unzip、Bash、PowerShell（pwsh）、TLS証明書・取得ツール。
-- 上記は26系で導入確認済みのリストではない。隔離環境で提供版・依存を確認して固定する。ホストでsudoを実行しない。
+- 上記は26.04 LTSで導入確認済みのリストではない。隔離環境で提供版・依存を確認して固定する。ホストでsudoを実行しない。
 - MODULE.bazelのglib-2.0、gobject-2.0、ibus-1.0、Qt6Core/Gui/Widgetsをpkg-configで検出できることを確認する。
 
 ## BazeliskとBazel
@@ -30,6 +30,7 @@ CI方式はPowerShellでdaily生成し、generatedとdist/dictionaryを引き継
 bazelisk version
 pkg-config --modversion ibus-1.0 Qt6Core Qt6Gui Qt6Widgets
 bazelisk build package --config release_build --jobs=2
+# 任意の参考検証。Fcitx5の動作検証ではない
 bazelisk test //unix/ibus:key_translator_test //unix/ibus:surrounding_text_util_test --jobs=2 --test_output=errors
 ```
 
@@ -43,9 +44,26 @@ ELFはfile/readelfでx86_64、インタプリタ、NEEDEDを検査し、実行�
 
 ## 受入条件と引き継ぎ
 1. 正確なUbuntu版・x86_64・対象SHA・ツール版・辞書入力を固定し、手順とログで再現可能。
-2. 通常packageビルドと限定テストが成功し、成果物一覧・ハッシュ・依存検査結果が記録される。
+2. 通常packageビルドと選定した限定テストが成功し（IBus向けは任意参考で受入条件外）、成果物一覧・ハッシュ・依存検査結果が記録される。
 3. 24.04 CIとの相違を記録し、CI実行結果を参照する場合はSHA・run URL・対象ジョブを明示する。
-4. ホストIME・既存Mozc・システム領域に変更がない。未解決障害がある場合は未完了として報告する。
-5. Phase 2へ成果物、競合箇所、IBusコールバックの未検証事項、隔離入力試験案を引き継ぐ。ビルド合格を実機入力合格にしない。
+4. ホストFcitx5・既存Mozc・システム領域に変更がない。未解決障害がある場合は未完了として報告する。
+5. Phase 2へ成果物、競合箇所、Fcitx5統合差分表・コールバックの未検証事項、隔離入力試験案を引き継ぐ。ビルド合格を実機入力合格にしない。
 
-Phase 1開始前の未決事項：正確なUbuntu 26系の版、隔離環境方式、Bazelisk版、辞書取得量と許可範囲、資源上限、ログ保存先。Phase 2以降は別途承認を待つ。
+Phase 1開始前の未決事項：Fcitx5の版・導入アドオン、隔離環境方式、Bazelisk版、辞書取得量と許可範囲、資源上限、ログ保存先。Phase 2以降は別途承認を待つ。
+
+## Fcitx5統合調査の追加仕様
+Phase 1のFcitx5対応部分は調査までとし、`src/unix/fcitx5/` の追加やBUILD変更は実施しない。根拠と固定SHAは[Phase 0追加調査](phase-00-audit.md)を参照する。IBusは既存実装・通常packageの比較対象であり、入力動作やIBusテスト成功を受入条件にしない。
+
+成果物として次の差分表を作成する。
+- 固定したfcitx/mozcのFcitx5ソース・設定・アイコン・翻訳・ライセンス一覧と、Mozkey側に必要な変更先。IPC方式を第一候補とし、direct方式との差を明示する。
+- `@fcitx5`依存を提供するFcitx5Core/Fcitx5Moduleのpkg-config検出、Ubuntu 26.04の開発パッケージ名・実版・API/ABI対応。候補はlibfcitx5core-dev、libfcitx5utils-devを含むが、提供ファイルと推移依存を確認して確定する。名称だけから必要十分と判断しない。
+- 元実装の `//unix/fcitx5:fcitx5-mozc.so` と `use_server`、Mozkeyのclient/protocol/辞書ターゲットとの依存対応。MODULEのOS限定、Windows/macOSで不要なFcitx検出を起こさない構成案。
+- 通常 `package` はFcitx5を含まないため、共有ライブラリ・addon/inputmethod設定・アイコン・Mozkey server/toolの独立した成果物一覧とstaging配置案。現段階ではFcitx5ビルドコマンドを実行可能と扱わない。
+- アドオンID `mozc`、ライブラリ名、server探索パス、ユーザープロファイル、IPCが既存Mozcへ接続・上書きしないための方式案。ホストで名前を変えるだけでは隔離完了としない。
+
+追加受入条件は、上記差分・依存・未解決API・ビルド構成案・ライセンスとPR #231との分担がレビュー可能であること。Fcitx5実装がない現行mainの通常Linuxビルド成功をFcitx5対応完了と扱わない。
+
+## 必須の隔離検証計画とPhase 2への引き継ぎ
+ビルドのみのコンテナは候補だが、実入力試験はホストと分離したUbuntu 26.04 LTS x86_64の使い捨てVMで行う。VMの作成・起動や導入操作も後続承認後に実施する。ホストHOME/XDG設定・個人辞書、session D-Bus、表示socket、runtime/IPC領域を共有しない。日常Fcitx5へ `--replace`、kill、再起動、アドオン導入・置換、IME切替を行わない。
+試験用VMはスナップショットと空の試験プロファイルを用意し、合成した日本語入力を使う。検証終了はVMの停止・破棄で戻せる構成とする。試験前後にホストの既存設定・アドオンが無変更であることを内容を公開せず確認する計画を残す。
+Phase 2は別途承認した最小統合を経て、Fcitx5から実際の日本語入力、ライブ変換、preedit、候補表示・選択・ページ移動、確定/取消、フォーカス移動、入力欄破棄、遅延応答取消を確認する。GTK/Qt等の代表アプリと利用予定の表示セッションを記録し、未確認のセッションを合格にしない。IBusの参考テスト結果は別欄に記録し、Fcitx5実機試験と区別する。

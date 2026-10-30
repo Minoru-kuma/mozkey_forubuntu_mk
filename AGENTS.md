@@ -1,7 +1,7 @@
 # Ubuntu対応開発の共通ルール
 
 ## 目的と正本
-Minoru-kuma/mozkey_forubuntu_mkでMozkeyをUbuntu上で日常利用可能にし、可能ならkoyasi777/mozkeyへ還元する。大元はgoogle/mozc。第一対象はUbuntu 26系 x86_64 + IBus（細かい版は着手前に確定）。Ubuntu 24.04は既存CIとの比較対象とする。
+Minoru-kuma/mozkey_forubuntu_mkでMozkeyをUbuntu上で日常利用可能にし、可能ならkoyasi777/mozkeyへ還元する。大元はgoogle/mozc。第一対象はUbuntu 26.04 LTS（x86_64）+ Fcitx5。Ubuntu 24.04は既存CIとの比較対象とする。
 
 実装・仕様・進捗の正本はGitHubの最新main。作業ブランチの未マージ文書は提案として扱う。恒久ルールは本書、ロードマップ・進捗・承認状態は[PLANS.md](PLANS.md)、個別仕様は[docs/ubuntu](docs/ubuntu/phase-00-audit.md)に置く。報告は原則日本語。
 
@@ -17,7 +17,8 @@ Minoru-kuma/mozkey_forubuntu_mkでMozkeyをUbuntu上で日常利用可能にし�
 既存Mozc/Mozkey実装を尊重し、Windows/macOSへの回帰を避ける。共通コード変更時はOS分岐と既存テストを確認し、実行できないOSの検証を未検証と明記する。既存PRとの重複を確認する。
 
 ## 安全性と検証
-sudo、システム領域への導入、既存Mozc/IBusの削除・置換、IME設定変更、Zenz/llama-server起動、大容量モデル・辞書取得は個別に承認された範囲でのみ行う。作業ログへ入力内容・個人辞書・認証情報を含めない。
+ユーザーはFcitx5を日常利用している。既存Fcitx5のプロセス・設定・アドオン・個人辞書を保護する。入力検証にはホストとHOME、XDG領域、D-Bus、表示セッション、IPC名前空間を共有しない使い捨てVMを用いる。詳細はPhase文書に従い、同一デスクトップでの別プロセス起動だけを隔離とみなさない。IBusは既存実装の参考・比較対象であり、対応の受入条件に含めない。IBusテスト成功をFcitx5動作成功として報告しない。
+sudo、システム領域への導入、既存Fcitx5/Mozc/IBusの削除・置換、IME設定変更、Zenz/llama-server起動、大容量モデル・辞書取得は個別に承認された範囲でのみ行う。作業ログへ入力内容・個人辞書・認証情報を含めない。
 各Phaseでテスト計画、受入条件、変更・実行結果を記録する。文書のみならdiff検査、参照先・整合性・変更範囲の確認を行い、大規模ビルドや全件テストをしない。CI定義、CI実行成功、実機動作成功を区別し、事実・推測・未検証を分ける。
 
 ## 完了と報告
