@@ -1,6 +1,6 @@
 # Phase 1 実行結果・Fcitx5統合差分
 
-**最新状態（2026-10-31）：Ubuntu 26.04.1 x86_64で通常packageビルド・限定テスト・zip/ELF検査に成功。受入検証済み、レビュー待ち。過去の未達記録は経緯として保持する。Fcitx5実入力・Phase 2は未実施。**
+**最新状態（2026-10-31）：Ubuntu 26.04.1 x86_64で通常packageビルド・限定テスト・zip/ELF検査に成功。受入検証・ユーザーレビュー完了。過去の未達記録は経緯として保持する。Fcitx5実入力・Phase 2は未実施。**
 
 [共通ルール](../../AGENTS.md) / [計画](../../PLANS.md) / [実行仕様](phase-01-build.md) / [Phase 0](phase-00-audit.md)
 
@@ -199,3 +199,17 @@ Ubuntu 26.04.1 x86_64、GCC 15.2.0、Bazel 9.0.2、固定daily辞書による通
 Phase 2ではFcitx5フロントエンド、独立ID/ライブラリ/設定/IPC/データ配置、遅延callback/世代・候補更新・入力欄寿命、Hazkey共存と復旧を実装・検証する必要がある。初期試験は分離VM推奨、ホスト追加は別途明示承認。通常ビルド成功をFcitx5対応完了に読み替えない。
 今回エージェントによるsudo・追加システム変更・ソース機能修正は0。既存Fcitx5/Hazkeyの設定・辞書・入力環境の変更、IME登録/切替/起動、Zenzサーバー実行、Phase 2開始、mainマージは行っていない。元作業ツリーのステージ済み変更を保持した。
 ローカル証拠はR/logsのd-build.log、d-build-interrupted.log、d-test.log、各metrics.json、artifact-summary.json、elf-*、elf-dependency-check.json、test-summary.json、およびBazel test.xml/test.log。証拠の要約のみ文書としてコミットする。
+
+## 最終レビューとフォークmainへの反映
+ユーザーがPhase 1の受入条件を確認し、レビュー完了とフォークmainへのマージを承認した。マージ前にGitHub Actions APIで、対象SHA `b0098a0949e75a8f9fe158174e4b38d0ddc2a919` のworkflow runが6系統あり、全てstatus=completed、conclusion=success、run_attempt=1であることを確認した。
+
+| 系統 | 対象SHAの実行結果 |
+|---|---|
+| CI for Linux | [success](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/41166902783) |
+| CI for Windows | [success](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/41166902789) |
+| CI for macOS | [success](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/41166902793) |
+| CI for Android | [success](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/41166902859) |
+| CI for Lint checks | [success](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/41166902840) |
+| Zenz runtime lock integrity (read-only) | [success](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/41166902748) |
+
+上記はレビュー対象b0098a0のCI証拠であり、このレビュー状態追記コミットやマージ後mainでの新規CI成功を意味しない。受入内容・ソースは変えず、レビュー状態と証拠URLだけを追記した。Phase 1は完了として扱い、Phase 2以降は未承認・未実施。本家PRは作成しない。マージ後のフォークmain HEADと文書反映、既存作業ツリー保持の最終確認は作業報告に記載する。
