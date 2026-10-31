@@ -1,5 +1,7 @@
 # Phase 1 実行結果・Fcitx5統合差分
 
+**最新状態（2026-10-31）：Ubuntu 26.04.1 x86_64で通常packageビルド・限定テスト・zip/ELF検査に成功。受入検証済み、レビュー待ち。過去の未達記録は経緯として保持する。Fcitx5実入力・Phase 2は未実施。**
+
 [共通ルール](../../AGENTS.md) / [計画](../../PLANS.md) / [実行仕様](phase-01-build.md) / [Phase 0](phase-00-audit.md)
 
 ## 結論・基点
@@ -126,3 +128,74 @@ A未導入のため、今回の通常Bazel依存取得・コンパイルは開�
 ### 再開条件・報告
 B/Cは成功。Aは承認条件に合致したが対話認証が必要。通常ビルド未達を完了に変更しない。Aが実施可能になった時点で再シミュレーションと導入後差分確認を行い、Dを2GiB取得予算・全体60GiB以内で継続する。条件変更・予算超過見込みは停止して報告する。
 今回コミットするのは文書だけ。元adopt_ubuntuのステージ済み変更は保持。mainへマージしない。
+
+## apt導入後のD実行結果（2026-10-31、受入検証済み）
+
+### 基点・apt・再利用
+開始HEADは `4c4b9b3c1ca4a121c1b0657a2672c0fb6bdb4098`。originをfetchし専用リモートブランチと一致、mainより3コミット先行・後方0を確認した。製品ソースの基点はmainの `4bc953dca52110e4dccf469df6d1c1da707baafe` のまま。
+ユーザーが対話端末でAを導入済み。準備案の全38パッケージについてdpkgの版とinstall ok installed状態が一致した。systemd/udev/libsystemd0は259.5-0ubuntu3.4を維持。今回のエージェント操作ではsudo・apt導入・索引更新を実施していない。
+
+| 検出 | 結果 |
+|---|---|
+| pkg-config | 2.5.1 |
+| glib-2.0 / gobject-2.0 | 2.88.0 / 2.88.0 |
+| ibus-1.0 | 1.5.34-rc2 |
+| Qt6Core / Qt6Gui / Qt6Widgets | すべて6.10.2 |
+| pkg-config --cflags --libs | IBus/GLib・Qt6のinclude/link設定を正常出力 |
+
+Bの3公式配布ファイルと配置済みBazelisk、Cの生成済みdaily4ファイルのSHA-256を再照合し完全一致。再取得・辞書再生成なし。ビルド終了後にもdaily4ファイルのハッシュ一致を確認した。
+
+### 実行環境・再現コマンド
+作業ルートをR=`/home/mizki/workdir/mozkey_forubuntu_mk/.local/ubuntu-phase1`、checkout/srcをcwdとする。PATHはR/tools/bin:/usr/bin:/bin、TMPDIR=R/tmp、XDG_CACHE_HOME=R/cache、XDG_CONFIG_HOME=R/config、XDG_DATA_HOME=R/data、BAZELISK_HOME=R/bazelisk-cache。USE_BAZEL_VERSION=R/downloads/bazel-9.0.2-linux-x86_64（ハッシュ検証済み）、ANDROID_NDK_HOMEは当該プロセス内で空にした。ホストの永続設定は変更していない。
+
+```sh
+# Rは上記作業ルート。大規模出力・キャッシュは全て同じディスク上
+bazelisk --output_user_root="$R/bazel-output" --batch build package \
+  --config release_build --jobs=2 \
+  --repository_cache="$R/repository-cache" --disk_cache="$R/disk-cache"
+bazelisk --output_user_root="$R/bazel-output" --batch test \
+  //unix/ibus:ibus_mozc_test //zenz:zenz_wire_protocol_test \
+  //zenz:zenz_unix_socket_path_test --config release_build --jobs=2 \
+  --test_output=errors --repository_cache="$R/repository-cache" \
+  --disk_cache="$R/disk-cache"
+```
+
+通常buildは終了0。最初の試行は一時sandboxファイルが容量計測中に消え、監視スクリプトがduの非0終了で停止した。直ちにビルドのプロセス群を終了し、duが出すサイズ値を消滅ファイルの警告と区別する監視へ修正してキャッシュから再開。変更は作業ルート内の監視用スクリプトのみで、製品ソースは無変更。再試行のBazel時間は485.552秒（先行キャッシュあり）、Bazelは2,026工程を完了した。完全なキャッシュなし所要時間は今回未測定。
+QtのC locale→C.UTF-8自動切替、辞書生成の語形警告、prediction属性のdeprecated警告があったがエラーではなく、回避のソース修正・システム設定変更は行っていない。
+
+### 限定テスト
+| ターゲット | ケース数 | 結果・範囲 |
+|---|---:|---|
+| //unix/ibus:ibus_mozc_test | 22 | 全成功、失敗/エラー/disabled 0。IBus参考検証でFcitx5受入の代用ではない |
+| //zenz:zenz_wire_protocol_test | 3 | 全成功。通信形式の単体検証 |
+| //zenz:zenz_unix_socket_path_test | 3 | 全成功。パス生成の単体検証 |
+
+Bazel testは終了0、3ターゲット・計28ケース成功。Bazel時間449.556秒、IBusテスト実行約40.1秒。Zenzの2テストはIPC utilityの単体テストであり、scorer/llama-serverの起動やAIモデル実行はしない。全件テストやIMEセッションでの動作試験は行っていない。
+
+### zip・ELF静的検査
+成果物は `src/bazel-bin/unix/mozc.zip`、33,345,803 bytes、SHA-256 `1228c8ccd9f3c7c833c61265a3c00f86ec187f721bfb8b91a8b2fcfa7c0de066`。ZIP CRC検査に成功。絶対パス・親ディレクトリ参照・symlinkエントリがないことを確認し、R/artifact-inspection配下だけに展開した。
+`src/unix/BUILD.bazel`、build_package.py、config.bzlと照合し、server/tool/renderer、IBusエンジン/XML、Emacs helper/el、アイコンを確認。zip内のtmp/icons.zipはbuild_package.pyの既存配置に由来する同梱物で、ホスト/tmpへ展開していない。Fcitx5アドオンとZenz scorerは通常packageに含まれない。
+
+| ELFパス（zip内） | bytes | SHA-256 |
+|---|---:|---|
+| usr/bin/mozc_emacs_helper | 2,970,952 | 5e47b61f71d8caf038148fbd9d8c11837acac896dc75dd3d326c20470145a964 |
+| usr/lib/ibus-mozc/ibus-engine-mozc | 3,175,312 | be73c2c0439e07e8e418b60db3fb1655b12263252d4e5d90340d202cc115a487 |
+| usr/lib/mozc/mozc_server | 43,206,048 | b1befe3851f0b38f4db281c7fa5d4129821296c86442d2c05b813da9a2966845 |
+| usr/lib/mozc/mozc_tool | 4,230,752 | 0dae212840b0f95ee5c0b0f6c39d54f6d53e25a0972b14a984e62c8d61aa0da8 |
+| usr/lib/mozc/mozc_renderer | 2,847,592 | df1bb8a8fee5df78e89b8f818738d0f8933e057acced1f222629cb11bc80e179 |
+
+5つのELFはすべてELF64 x86-64。file/readelf -h/-l/-dでヘッダー、インタプリタ、NEEDEDを確認し、インタプリタ実体がホストに存在することを検証した。ldconfig -pのx86-64エントリとreadelfで推移依存も静的に辿り、合計55オブジェクトの参照で欠落0。Qt6/IBus/GLib・標準C/C++ runtimeを検出した。
+検査は静的なライブラリ存在・形式照合であり、GUI/IME実行、入力、動的ロード時のすべての挙動、Ubuntu 24.04へのバイナリ互換性は保証しない。成果物をシステムへ導入していない。
+
+### 予算と監視の限界
+監視修正後は全非loopbackインターフェースの起動以来の受信カウンタを保守的な上界として計上した。これにはB/C取得・他アプリ通信も含まれ、D単体の正確な転送量ではない。監視中断前の取得を過小評価しないため、この上界で2GiBに64MiBの余白を設けて停止する方式にした。
+再build中の受信増分は5,553,527 B、test中は6,574,679 B。最終の保守的上界は1,671,148,142 B（約1.56GiB）で2GiB以内。監視による停止はなし。
+容量は2秒ごとにduで観測し、全体59GiBで停止する監視を使用。監視の見かけサイズピーク約2.63GiB。処理後du -s -B1では実割当3,218,370,560 B（約3.00GiB）、du -sbでは2,825,075,828 B（約2.63GiB）。見かけサイズとブロック割当の差があるため両方記録した。60GiBに十分余裕があり、ディスク空きは約279G。実行後のログ・文書追記によりサイズはわずかに増える。
+作業用tmp・Bazel出力・依存キャッシュ・zip展開はディスク上のR内。生成物・キャッシュ・個人情報を含み得る生ログはGit登録しない。
+
+### 最終受入判定とPhase 2への引き継ぎ
+Ubuntu 26.04.1 x86_64、GCC 15.2.0、Bazel 9.0.2、固定daily辞書による通常packageビルド・限定テスト・成果物の静的検査を達成。Fcitx5統合差分・未解決事項は本書の既存調査を引き継ぎ、Phase 1は受入検証済み・レビュー待ちとする。
+既存24.04 CIとの差はOS/GCC等のホスト環境と限定テスト範囲。CIと同じdaily生成経路・通常release_build package設定を使用したが、CIの全件debugテストやCI run成功確認の代わりとはしない。
+Phase 2ではFcitx5フロントエンド、独立ID/ライブラリ/設定/IPC/データ配置、遅延callback/世代・候補更新・入力欄寿命、Hazkey共存と復旧を実装・検証する必要がある。初期試験は分離VM推奨、ホスト追加は別途明示承認。通常ビルド成功をFcitx5対応完了に読み替えない。
+今回エージェントによるsudo・追加システム変更・ソース機能修正は0。既存Fcitx5/Hazkeyの設定・辞書・入力環境の変更、IME登録/切替/起動、Zenzサーバー実行、Phase 2開始、mainマージは行っていない。元作業ツリーのステージ済み変更を保持した。
+ローカル証拠はR/logsのd-build.log、d-build-interrupted.log、d-test.log、各metrics.json、artifact-summary.json、elf-*、elf-dependency-check.json、test-summary.json、およびBazel test.xml/test.log。証拠の要約のみ文書としてコミットする。
