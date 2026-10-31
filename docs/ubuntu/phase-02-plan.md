@@ -1,6 +1,6 @@
 # Phase 2 詳細実装計画・受入条件（レビュー案）
 
-**状態：計画作成のみ承認済み。実装・ビルド実行・試験用IME起動・システム導入・既存IME変更・Phase 3は未承認、未実施。**
+**状態：全体設計は条件付き承認済み。レビュー指摘のstaging/実行時パス分離、IPC応答時間の目標と停止条件、Git反映記録を本書に反映。今回の承認範囲は文書修正・検証・同作業ブランチへのコミット/プッシュのみ。実装・ビルド実行・試験用IME起動・システム導入・既存IME変更・Phase 3は未承認、未実施。**
 
 [共通ルール](../../AGENTS.md) / [ロードマップ・承認](../../PLANS.md) / [Phase 0調査](phase-00-audit.md) / [Phase 1結果](phase-01-results.md)
 
@@ -25,12 +25,12 @@ Phase 1結果の前半には未達時点の履歴が残る。結論は冒頭・�
 
 | 段階 | 実施案・成果物 | 開始条件・終了条件 |
 |---|---|---|
-| 今回：計画レビュー | 本書とPLANSの参照・提案状態を整える。読取り調査と文書検査のみ | 今回の依頼範囲。コード追加、ビルド、IME起動、導入はしない |
+| 今回：計画レビュー修正 | 条件付き承認を記録し、本書とPLANSの整合・差分を検証して同作業ブランチへコミット/プッシュ | 今回の依頼範囲。コード追加、ビルド、IME起動、導入はしない |
 | 2A：実装・ビルド・静的/単体検証 | 選択移植、名前/パス分離、callback、限定テスト、作業領域へのstaging、差分・由来・成果物manifest | 本計画の実装範囲・依存取得/資源予算の承認。必要なシステム開発依存の導入は別途承認。A1〜A7を満たす |
 | 2B：隔離環境での初期入力試験 | Ubuntu 26.04.1 x86_64のVMを第一案とし、読み込み、通常/ライブ変換、寿命・障害・撤去復旧を検証 | 初期試験環境、取得物、ゲスト内導入・IME起動の範囲を明示して承認を受ける。A8〜A11を満たす |
 | 2C：実ホスト共存試験 | Hazkeyを残してMozkeyを追加し、切替・独立性・復旧を確認 | 2A/2B合格、衝突調査と導入/復旧手順レビュー後、**実ホストへの追加・必要なFcitx5設定変更/再起動の別途明示承認**。A12を満たす |
 
-2A/2Bの合格は「Phase 2前半合格」と報告する。2C未実施のままPhase 2全体完了や実ホスト共存成功としない。各段階で停止・証拠を報告する。Phase 3進行、コミット/プッシュ、PR作成・マージも今回の承認に含めない。
+2A/2Bの合格は「Phase 2前半合格」と報告する。2C未実施のままPhase 2全体完了や実ホスト共存成功としない。各段階で停止・証拠を報告する。今回の文書コミット/プッシュ承認は、実装・各段階の実行・Phase 3進行・PR作成/マージの承認を兼ねない。
 
 ## 3. 統合方式と変更対象
 
@@ -49,7 +49,7 @@ fcitx/mozc全体のマージやMODULE全置換は行わず、固定SHAから必�
 | `src/unix/`の専用staging処理案 | `.so`、設定、アイコン/翻訳、server/tool、必要な辞書データとライセンスをmanifest付きで作業領域に配置。既存IBus用mozc.zipをインストール入力にしない |
 | `docs/ubuntu/phase-02-results.md`（実行後） | 環境・SHA・テスト表・hash/依存・未検証事項・2A/2B/2C別判定・導入/無効化/撤去/復旧手順を記録 |
 
-ビルド設定名の提案は`--//:linux_mozkey=true`（既定false）、専用server配置設定は`--//:mozkey_server_dir=絶対パス`とする。これらの設定と上表の新規ターゲットは**未実装**。マクロ/生成ヘッダー等で全対象へ一貫して伝搬し、ファイルごとの手動書換えや一部バイナリだけの名前変更を避ける。通常packageの置換・IBus登録は対象外。
+ビルド設定名の提案は`--//:linux_mozkey=true`（既定false）、専用serverの**実行環境内の配置**設定は`--//:mozkey_server_dir=/usr/lib/mozkey`とする。staging先の絶対パス`P2_STAGE`は梱包処理のDESTDIR相当としてのみ使い、実行時探索先へ連結しない。これらの設定と上表の新規ターゲットは**未実装**。マクロ/生成ヘッダー等で実行時設定を全対象へ一貫して伝搬し、ファイルごとの手動書換えや一部バイナリだけの名前変更を避ける。通常packageの置換・IBus登録は対象外。
 
 2A内の作業順序は次のとおり。各項目をレビュー可能な差分に分け、初回ロード前にすべての静的・単体検証を終える。
 
@@ -73,7 +73,7 @@ fcitx/mozc全体のマージやMODULE全置換は行わず、固定SHAから必�
 | addon/inputmethod定義 | mozc.conf | `share/fcitx5/addon/mozkey.conf`、`share/fcitx5/inputmethod/mozkey.conf` |
 | フロントエンド設定 | `conf/mozc.conf` | `$XDG_CONFIG_HOME/fcitx5/conf/mozkey.conf`。他addon設定やFcitx5共通profileは2C承認前に触れない |
 | action/property、アイコン、gettext | mozcState、mozc-*、fcitx_mozc*、fcitx5-mozc | mozkey専用prefix/domain。全登録名を棚卸しし同一Fcitx5内で一意 |
-| server/tool実行名 | mozc_server / mozc_tool | mozkey_server / mozkey_tool、製品配置`/usr/lib/mozkey/`案。staging用にビルド時絶対パスを指定。`PATH`や`/usr/lib/mozc`へのfallbackを設けない |
+| server/tool実行名 | mozc_server / mozc_tool | mozkey_server / mozkey_tool、実行環境内の配置`/usr/lib/mozkey/`案をビルド時に指定。2Aのstagingは`$P2_STAGE/usr/lib/mozkey/`へコピーするだけで、P2_STAGEを探索先へ埋め込まない。`PATH`や`/usr/lib/mozc`へのfallbackを設けない |
 | server設定・ユーザー辞書・学習 | 既存`~/.mozc`優先、XDG側もmozc | `$XDG_CONFIG_HOME/mozkey`、未設定時`$HOME/.config/mozkey`のみ。HOMEなしもgetpwuid経由の`.config/mozkey`に統一。既存`.mozc`/Hazkeyから読取り・自動移行しない |
 | IPC鍵・mutex | profile内`.session.ipc`、`.server.lock`等 | ファイル名を維持しても**親profileはMozkey専用**。tool/singleton/log/history関連も同profileへ。作成は本人所有・private権限、symlink/別所有者は安全側で失敗 |
 | 通常server IPC | `/tmp/.mozc.<key>.session`相当 | Linuxでは先頭NULの**抽象Unixソケット**。同形式のmozkey接頭辞へ変更。ファイルunlinkやTMPDIR変更では分離できない。profile鍵・製品prefix・peer/実行パスを併せて検証 |
@@ -85,6 +85,22 @@ Linuxの抽象ソケットの根拠は現行`src/ipc/ipc_path_manager.cc:GetPath
 clientの版違い処理はserverを終了・再起動する場合があるため、接続だけでなくShutdown/ForceTerminate/Wait/ready eventの対象を専用serverへ限定する。renderer・GUI singleton等、実際に起動しない経路も誤ったプロセスを起動できないよう一覧化する。Fcitx5の候補UIを使い、外部mozc_rendererは通常入力には起動しない。
 
 同一Fcitx5プロセス内のELFシンボル衝突も検査する。factory V2名を変え、動的exportをFcitx5が必要とする入口へ絞る方針を採る。`nm -D`/`readelf --dyn-syms`でmozc/Abseil/protobuf等の不要exportを確認し、必要ならvisibility/linker export制御を追加する。Abseil flags等のグローバル初期化・登録名の重複も試験する。library名の違いだけでシンボル独立を保証しない。
+
+### stagingと実行環境の配置契約
+
+初期案は固定した実行時prefixを用いる。これはビルドホストのstagingディレクトリを移動しても成果物を再ビルドせずVMへ持ち込める設計であり、任意の実行時prefixへの自動追従を約束するものではない。
+
+| 段階 | 保管・配置先 | server/toolの探索先 |
+|---|---|---|
+| 2A：staging | 作業ディスク内の絶対パス`$P2_STAGE/usr/lib/mozkey/`等 | 成果物の実行時設定は`/usr/lib/mozkey/`。ホストの同パスへ導入・起動しない。単体試験のファイル/起動処理はfixture・fakeへ注入する |
+| 2B：VMへ転送・承認後の導入 | staging内容を相対パスで梱包してVM内の任意の受取ディレクトリへ転送後、承認された手順でゲストの`/usr/lib/mozkey/`等へ配置 | ゲスト内の`/usr/lib/mozkey/`。ホストのP2_STAGE・checkout・Bazel出力・共有mountに依存しない |
+| 2C：別途承認後の実ホスト追加 | レビュー済みmanifestに従ってホストの`/usr/lib/mozkey/`等へ配置 | ホスト内の`/usr/lib/mozkey/`。2Bと同じ実行時設定と成果物hashを照合し、対象ABIも再確認する |
+
+manifestには相対梱包パス、実行環境内の配置先、実行時server/tool探索先、hash、依存、ビルド設定を分けて記録する。バイナリの起動パス・RPATH/RUNPATH、設定・symlink・launcher等にP2_STAGEやビルドホストの絶対パスへの実行時依存を残さない。debug情報等に残る出典パスと、実行時に必要なパスは区別して検査する。
+
+2Bでは受取先を2Aと異なるパスにし、ホストの作業領域をmountせず、ゲスト内の導入後に受取ディレクトリも移動/切離してT00/T01を行う。起動したPIDの実体、server/toolの解決先、専用profile/IPC、依存ライブラリを照合し、ホストパスが存在しなくても正しく動作することを証明する。探索失敗時は専用IMEを安全に無効化し、旧stagingパス・Mozc/Hazkey・PATHへfallbackしない。2Cでも承認済み配置に対して同じ照合を行う。
+
+別の実行時prefixを選ぶ場合は、2B/2Cの導入承認前にそのprefixを固定し、アドオン/server/toolを同じ設定で再ビルドしてmanifest・静的検査・移動後試験をやり直す。バイナリの文字列置換、ホストstagingへのsymlink、実行時の広域環境変数での探索回避は採用しない。
 
 ## 5. ライブ変換・遅延コールバック
 
@@ -111,9 +127,18 @@ focus outは参照元の「明示IME切替ではSUBMIT、通常focus移動では
 
 ### IPC待ち・障害
 
-現行clientはopt既定30秒、debug100秒のIPC timeout、server起動待ちは20秒。これらをFcitx5のイベント処理へそのまま持ち込まない。2Aの先頭で専用IPC adapterの起動・再接続・終了経路を確認し、**通常の同期IPCは要求全体100ms以内、起動/復旧待ちはUI外で非同期**を初期設計値とする。単に`set_timeout`を1回呼ぶだけでは複数往復やlauncher/destructor待ちを制限できないため、経路全体のdeadlineを設ける。Clientへの同時アクセスは行わない。
+現行clientはopt既定30秒、debug100秒のIPC timeout、server起動待ちは20秒。これらをFcitx5のイベント処理へそのまま持ち込まない。2Aの先頭で専用IPC adapterの起動・再接続・終了経路を確認する。**通常IPCは要求全体100ms、障害時のイベントループ復帰は250msを初期目標値**とし、測定前から実現可能性や確定した合格閾値を断定しない。起動/復旧待ちはUI外で非同期にする。単に`set_timeout`を1回呼ぶだけでは複数往復やlauncher/destructor待ちを制限できないため、経路全体のdeadlineを設ける。Clientへの同時アクセスは行わない。
 
-未接続時は短い準備状態を表示して新しい通常キーをpass-throughし、準備完了後に新sessionを使用する。変換中の通信失敗は未確定文字列を保護したうえで当該要求/epochを打ち切り、遅い応答を確定・再生しない。結果不明なキー/commitを自動再送しない。失敗時の未確定文字列の取消/再入力手順をUIと試験仕様へ記す。この契約を満たせない場合は2A未達として設計を再提示し、初回ロードへ進まない。
+未接続時は短い準備状態を表示して新しい通常キーをpass-throughし、準備完了後に新sessionを使用する。変換中の通信失敗は未確定文字列を保護したうえで当該要求/epochを打ち切り、遅い応答を確定・再生しない。結果不明なキー/commitを自動再送しない。失敗時の未確定文字列の取消/再入力手順をUIと試験仕様へ記す。
+
+2Aではfakeの遅延・無応答・切断・版違いを注入し、通常送信だけでなく接続、再試行、起動、再接続、focus out、client破棄、addon終了までの待ちを確認する。要求受付から応答適用/打切りまでの全往復と再試行を含む経過時間、イベント処理への進入から次のdispatchへ戻るまでの時間、待ちがUIスレッド内か外かを記録する。設定されたlive delayやcold startの所要時間は分けて計測する。
+
+次の場合はA5を未達/保留とし、2Aで停止して初回ロード・2B/2Cへ進まない。
+
+- IPC、launcher、mutex、破棄等の同期ブロックを経路全体で制限/取消できず、Fcitx5のイベント処理を止める可能性が残る場合。数値目標をたまたま満たす測定だけで合格にしない。
+- 初期目標を達成できない場合、または未確定文字列の保護・古い応答の排除・二重確定防止・他IME不干渉を保ったまま待ちを短縮できない場合。
+
+測定ログと原因を提示し、直列IPC workerへの待ち処理の移動やFcitx5への完了通知等を含む再設計案をレビューする。非同期化でも要求順序、InputContextの寿命、UIのイベントループ上での更新、キーを一度だけ処理する契約を維持する。目標未達が環境負荷等に起因する場合も、測定条件・利用者への影響・修正案または数値変更案をレビューし、合意した基準と対応試験を記録してから再検証する。タイムアウト延長だけで同期ブロックを容認したり、100ms/250msを無断で緩和・削除して先へ進んだりしない。
 
 ## 6. ビルド依存・Phase 1資産の再利用
 
@@ -163,22 +188,25 @@ apt-get -s --no-install-recommends --no-upgrade --no-remove install \
 pkg-config --modversion Fcitx5Core Fcitx5Module Fcitx5Utils
 pkg-config --cflags --libs Fcitx5Core Fcitx5Module
 
-# P2_STAGEは作業ディスク上。既定の/usrを対象にしない
+# 実行時配置はVM/承認後ホスト内のパス。ここでは導入・起動しない
+P2_RUNTIME_SERVER_DIR=/usr/lib/mozkey
+# P2_STAGEは別の作業ディスク上のstagingルート（梱包時のDESTDIR相当）
+# P2_STAGEをmozkey_server_dirへ連結しない
 bazelisk --output_user_root="$R/bazel-output" --batch build \
   //unix/fcitx5:fcitx5-mozkey.so //server:mozc_server //gui/tool:mozc_tool \
   --config release_build --jobs=2 --//:linux_mozkey=true \
-  --//:mozkey_server_dir="$P2_STAGE/usr/lib/mozkey" \
+  --//:mozkey_server_dir="$P2_RUNTIME_SERVER_DIR" \
   --repository_cache="$R/repository-cache" --disk_cache="$R/disk-cache"
 
 # 新規テスト群にはfake IPC/clock/ICを使用。Fcitx5実入力とは別判定
 bazelisk --output_user_root="$R/bazel-output" --batch test \
   //unix/fcitx5:mozkey_tests \
   --config release_build --jobs=2 --test_output=errors \
-  --//:linux_mozkey=true --//:mozkey_server_dir="$P2_STAGE/usr/lib/mozkey" \
+  --//:linux_mozkey=true --//:mozkey_server_dir="$P2_RUNTIME_SERVER_DIR" \
   --repository_cache="$R/repository-cache" --disk_cache="$R/disk-cache"
 ```
 
-existing labelsのmozc_server/toolは内部名として残せるが、staging上の実行名・埋込み名はmozkeyへ統一する。新規stagingターゲットでは上記と同じ設定を使い、想定内容/hashをmanifest化する。テスト起動時もHOME/XDGを合成profileへ向け、通常ユーザーのprofile初期化を避ける。
+existing labelsのmozc_server/toolは内部名として残せるが、staging上の実行名・埋込み名はmozkeyへ統一する。新規staging処理では上記と同じ実行時設定でビルドした成果物を、梱包用の`$P2_STAGE/usr/lib/mozkey/`等へコピーする。P2_STAGEはバイナリのビルド設定へ渡さず、想定配置/hashをmanifest化する。2Aのテストではserver探索先の期待値を検査しつつ、実ファイルやプロセス操作はfixture/fakeへ注入し、ホストの`/usr/lib/mozkey`を起動しない。HOME/XDGも合成profileへ向け、通常ユーザーのprofile初期化を避ける。
 
 既存回帰は変更範囲に応じ`//base:system_util_test`、`//base:process_mutex_test`、`//ipc:ipc_path_manager_test`、`//ipc:ipc_test`、`//client:client_test`、`//session:session_test`のライブ変換/マクロ該当ケースを選ぶ。セッションのZenz関連はfakeを用い本物を起動しない。独立設定ON/OFF双方を確認し、従来package・Phase 1限定28ケースは必要な回帰として既定設定で再確認する。IBusテストをFcitx5受入に数えない。非Linuxの実行検証は利用可能なCI/端末がなければ未検証とする。
 
@@ -194,6 +222,7 @@ existing labelsのmozc_server/toolは内部名として残せるが、staging上
 
 | ID | 対象・操作 | 合格となる結果 |
 |---|---|---|
+| T00 | 2Bでstaging成果物を別パスへ転送しゲストの承認済み実行時配置へ導入、受取領域を移動/切離。2Cでも配置を再照合 | ビルドホストのstaging/checkout/Bazel出力が存在しなくても動作。起動PIDの実体が実行環境内の専用server/toolと一致、必要な依存・profile/IPCが専用領域を使う。旧staging・他IME・PATHへのfallback0 |
 | T01 | addon列挙・初回load、設定UI | 独立したMozkey名/ID、正しい.so/server、設定と辞書toolが専用profileを使う。既存addon登録と混同しない |
 | T02 | ローマ字/かな、半角全角、key up/down、modifier、JIS/US配列 | 読み・cursor・preeditが一致、未処理キーは1回だけアプリへ。モード変更が正しく反映 |
 | T03 | Space変換、候補選択/クリック、ページ移動、Enter/Esc/Backspace | 正しい候補ID、確定文字列1回、取消でpreedit/候補が消え、再入力できる |
@@ -210,7 +239,7 @@ existing labelsのmozc_server/toolは内部名として残せるが、staging上
 | T13b | 隔離環境で同版Hazkeyと同時ロード・交互入力・再起動 | addon初期化/flags/export衝突0、双方で入力可能、合成辞書と設定が独立。個人profileは使用しない |
 | T14 | 別途承認後の実ホストHazkey↔Mozkey切替、両者の設定・合成辞書登録 | Hazkeyを保持し双方で入力可。Mozkeyへの登録がHazkeyへ現れず、Hazkeyの既存データを移行/変更しない。Mozkeyだけを無効化して元の入力環境へ戻せる |
 
-T04の受入測定は同じVM・jobsを止めた条件で、設定遅延より早く適用しないこと（時計/計測誤差5ms）と、最終キーから「設定遅延+500ms」以内の表示を20回確認する。T09は通常要求のdeadline100ms、イベントloopへの復帰は250ms以内を目安としてfake障害試験で確認し、起動/再起動は別計測にする。環境負荷で達成できなければ数値を無断で緩めず、測定と修正案をレビューする。
+T04の受入測定は同じVM・jobsを止めた条件で、設定遅延より早く適用しないこと（時計/計測誤差5ms）と、最終キーから「設定遅延+500ms」以内の表示を20回確認する。T09は通常IPC要求全体100ms・障害時のイベントloop復帰250msを**初期目標値**としてfake障害試験と実serverで測定し、起動/再起動は別計測にする。A5の判定は第5節の測定・停止/再設計・再レビュー条件に従い、数値の無断変更で合格にしない。同期ブロックの制御、未確定文字列保護、古い応答/二重commit排除、他IME不干渉は目標値の調整とは別の必須条件として維持する。
 
 ## 8. 導入・無効化・撤去・復旧の設計
 
@@ -230,24 +259,30 @@ Hazkeyの稼働中にユーザー入力由来の辞書・学習データが変�
 |---|---|---|
 | A1 基点・由来 | main/参照元SHA、採用ファイル/ライセンス一覧、環境・依存・辞書hash、差分が再現可能 | 2A |
 | A2 独立性 | 全ID/登録名/実行パス/profile/IPC/鍵/mutex/動的exportの一覧と負試験T10。mozc/Hazkeyへのfallback/誤停止0 | 2A |
-| A3 ビルド | 専用.so/server/tool/stagingが同一設定で成功。manifest・hash・ELF64 x86_64・NEEDED/ABI・export・絶対パス・梱包内容検査に合格 | 2A |
+| A3 ビルド | 専用.so/server/tool/stagingが同一の実行時配置設定で成功。manifest・hash・ELF64 x86_64・NEEDED/ABI・export・絶対パス・梱包内容検査に合格。P2_STAGEと実行時探索先を分離し、起動パス/RPATH等にビルドホストへの実行時依存0。移動後の実動作はA8/T00で確認 | 2A |
 | A4 callback | fake IPC/clock/ICでT05〜T09の該当分を再現。世代/command全フィールド保持、取消、consumed=false、候補寿命・再描画、制限の期待値一致 | 2A |
-| A5 IPC応答性 | 起動/再接続/破棄経路までdeadlineと所有権を検証。通常要求100ms・障害時loop復帰250ms以内の基準を満たす | 2A |
+| A5 IPC応答性 | 起動/再接続/破棄経路までdeadlineと所有権・同期ブロックの制御を検証。通常要求100ms・障害時loop復帰250msを初期目標として測定し、合意した基準を満たす。未達/制御不能時は第5節に従い2Aで停止・再設計/再レビュー後に再検証。安全条件は緩和しない | 2A |
 | A6 既存回帰 | 独立設定OFF/ONで関連回帰と既定package/限定28ケースを確認。非LinuxにFcitx依存を強制せず、未実行OSは未検証と記録 | 2A |
 | A7 資産/ホスト保護 | Phase 1入力・成功証拠・キャッシュと元staged変更を保持。予算内。ホストIME・個人データ・システム設定の変更0 | 2A |
-| A8 初回入力 | Ubuntu 26.04.1 + Fcitx5 5.1.19基準の隔離環境でT01〜T04/T08/T11に合格、各結果と表示経路を記録 | 2B |
+| A8 初回入力 | Ubuntu 26.04.1 + Fcitx5 5.1.19基準の隔離環境でT00〜T04/T08/T11に合格、各結果と表示経路を記録。ホスト作業領域・転送受取領域がなくても専用server/toolを解決・起動できる | 2B |
 | A9 live・寿命・障害 | 実serverでもT05/T06/T09/T12/T13bに合格。liveの時間測定と確定/取消・候補更新が正しく、単なる無クラッシュ判定にしない | 2B |
 | A10 復旧 | T13成功、導入/無効化/撤去/復旧を第三者が再現できる。ホスト共存はこの時点では未検証 | 2B |
 | A11 ホスト不干渉 | ホストD-Bus/display/Fcitxプロセス・profile・IPC・Hazkeyデータに接続/書込みしない分離を確認。代替環境の残存リスクを記録 | 2B |
-| A12 実ホスト共存 | 別途明示承認後にT14成功。既存Hazkeyデータの保持・独立登録・切替・Mozkeyだけの無効化/復旧と検証範囲を記録 | 2C |
+| A12 実ホスト共存 | 別途明示承認後にT00の配置再照合とT14成功。既存Hazkeyデータの保持・独立登録・切替・Mozkeyだけの無効化/復旧と検証範囲を記録 | 2C |
 
-今回のレビュー対象は、IPC方式、InputContext別session、Linux専用の製品分離、callback/応答性契約、2A/2B/2Cの区分、依存の用意と資産再利用、試験・合格基準である。実装開始前には承認範囲（2Aのみか2Bも含むか）、開発依存の取得/配置、予算・初期環境の具体案を確定する。実ホスト導入とPhase 3は常に別途承認とする。
+全体設計は条件付き承認を受け、指摘されたstaging/実行時パス分離、IPC目標値と停止・再設計条件、Git状態の修正を本書へ反映した。実装開始前には実行承認範囲（2Aのみか2Bも含むか）、開発依存の取得/配置、予算・初期環境の具体案を確定する。今回の文書修正承認では実装・ビルド・IME起動・システム導入を開始しない。実ホスト導入とPhase 3は常に別途承認とする。
 
-## 10. 今回の検証記録
+## 10. 調査・文書検証とGit反映記録
 
-GitHubのmain・fcitx/mozc・PR #231と指定文書、関連する現行client/session/IPCを読取り照合した。ローカルではgit状態、既存資産、deb索引、aptシミュレーション、pkg-config検出、生成辞書4点とzipのhashを確認した。Fcitx5 5.1.19のtimer/InputContext APIも公式ソースで確認した。実行開始時には最新mainとPR状態を再確認する。
+初版作成時にGitHubのmain・fcitx/mozc・PR #231と指定文書、関連する現行client/session/IPCを読取り照合した。ローカルではgit状態、既存資産、deb索引、aptシミュレーション、pkg-config検出、生成辞書4点とzipのhashを確認した。Fcitx5 5.1.19のtimer/InputContext APIも公式ソースで確認した。実行開始時には最新mainとPR状態を再確認する。
 
-文書のdiff、新規ターゲットを未実装と明示していること、承認状態・Phase 1最終結果との整合を確認した。`git diff --check`と新規文書に対する`git diff --no-index --check /dev/null docs/ubuntu/phase-02-plan.md`は指摘なし、ローカル参照10件の存在検査は欠落0。計画worktreeの`src`差分は0、変更は本書新規作成とPLANS.mdのみ。元作業ツリーのステージ済み5ファイルと未追跡.localを保持し、Phase 1 checkoutは追跡変更なし。コミット・プッシュは未実施。
+初版では文書のdiff、新規ターゲットを未実装と明示していること、承認状態・Phase 1最終結果との整合を確認した。`git diff --check`と新規文書の空白検査は指摘なし、ローカル参照10件の存在検査は欠落0。初版の変更は本書新規作成とPLANS.mdのみで、`src`差分は0。
+
+初版はコミット[`f8c640aefa2ad1c3ee37c283b152641fa816a050`](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/commit/f8c640aefa2ad1c3ee37c283b152641fa816a050)として`origin/docs/ubuntu-phase2-plan`へ**プッシュ済み**。GitHub上のSHAと対象2ファイルを照合し、作業worktreeがclean・リモートとの差0であることを確認した。
+
+今回のレビュー修正開始時にもoriginのmainと作業ブランチをfetchし、mainは`9c75ffcc1e99c0efb0d65ad0e1f25148dc1ef7a1`、作業ブランチは上記f8c640aefでリモート一致を確認した。修正対象は本書と承認状態を整合させるPLANS.mdのみ。元作業ツリーのステージ済み5ファイルと未追跡.localを保持し、Phase 1 checkoutは追跡変更なし。
+
+修正の検証では差分/空白検査は指摘なし、ローカルリンク10件の欠落0、コマンド例2ブロックは`bash -n`による構文検査のみを実施し成功。受入条件A1〜A12を保持し、指摘に対応するA3/A5/A8/A12を更新した。既存試験15行、callback実装契約、第8節の導入/復旧安全条件に変更がないことも旧版と比較し確認した。T00のみを追加し、変更範囲は上記文書2ファイルに限定した。本修正の確定SHAと同作業ブランチへのプッシュ後のGitHub照合・worktree状態は完了報告に記録する。mainへの反映・PR作成/マージは今回の対象外。
 
 実装、コンパイル、Bazel起動、辞書再生成、IME起動、システム導入、既存IME変更、Zenz起動は行っていない。
 
