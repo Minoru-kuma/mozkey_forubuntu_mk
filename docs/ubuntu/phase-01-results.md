@@ -87,3 +87,42 @@ Fcitx側のLibrary=fcitx5-mozc、Addon=mozc、設定・アイコン名を含め�
 
 ## 再開準備の追記
 調査結果は承認済み。通常ビルドは未達のためPhase 1を継続し、[依存導入・取得の具体案](phase-01-preparation.md)を作成した。インストール・外部本体取得はユーザーの追加承認待ち。
+
+## 条件付き承認A〜D後の実行（2026-10-31）
+今回の開始SHAは9ee6f676171bcbc9e800dde9a7b71a3afce67c3e。A〜Dはユーザーが予算と安全条件付きで承認済み。**通常ビルドの受入条件は引き続き未達**。sudoの対話認証が利用できず、aptは開始できなかった。認証回避や別権限経路は使用していない。
+
+### A：再シミュレーション合格、実導入は未実施
+準備案の `apt-get -s --no-install-recommends --no-upgrade --no-remove install pkg-config=2.5.1-4 libibus-1.0-dev=1.5.34~rc2-1 qt6-base-dev=6.10.2+dfsg-7 libsystemd-dev=259.5-0ubuntu3.4` を再実行した。
+結果は **新規38件・更新0件・削除0件**。準備案の38件の名前・版をプログラムで照合し完全一致。apt索引更新はしていない。
+続いて同じinstallを `sudo -n apt-get ...` で実行したが、終了1・`sudo: interactive authentication is required` でパッケージ取得/導入開始前に停止。-nは認証対話を抑止する指定であり、権限回避ではない。システム変更なし。確認時もsystemd/udev/libsystemd0は259.5-0ubuntu3.4、pkg-config/IBus-dev/Qt6-devは未導入。
+再開にはユーザーの対話端末で準備案のsudo操作を行うか、利用可能な認証手段を用意する必要がある。パスワードを会話へ送信しない。再開時も再シミュレーションの一致を条件とし、索引/候補が変わった場合は再評価する。
+
+### B：公式ツール取得・ハッシュ・起動確認成功
+準備案の固定URLからBazelisk 1.30.0、Bazel 9.0.2（JDK同梱）、PowerShell 7.6.9 self-containedを取得。3点とも準備案のSHA-256と完全一致してから実行権限を付与。取得合計146,976,754 B。/usr/bin・/optへの配置、シェル設定変更なし。
+Bazelはdownloads内の検証済みバイナリを保持し、`USE_BAZEL_VERSION` にその絶対パスを指定してBazeliskから再取得せず実行した。Bazelisk経由の `--output_user_root=... --batch version` は終了0、Bazelisk v1.30.0 / Build label 9.0.2を確認。PowerShellの版確認は終了0、7.6.9。
+初回sandbox内のBazel versionは版表示後にNetworkMetricsCollectorのNullPointerExceptionで終了37。同じコマンドをsandbox外で再確認すると終了0となった。ソースや設定フラグの変更は行っていない。
+PowerShell初回はデータ保存先が既定の~/.local/share/powershellとなり読取り専用エラー。XDG_DATA_HOMEも作業ディスク内へ指定して正常起動した。ユーザーの既存設定・辞書は変更していない。
+
+### C：daily生成成功
+worktreeをtmpfsから `/home/mizki/workdir/mozkey_forubuntu_mk/.local/ubuntu-phase1/checkout` へ移動。git worktree moveはcross-device linkで失敗したため、mvとgit worktree repairで移動を完了。ブランチは同じfeat/ubuntu-phase1-build。
+作業プロセスのPATHを専用tools/bin・/usr/bin・/binに限定し、専用binのpythonを/usr/bin/python3へ向けた。TMPDIR、XDG_CACHE_HOME、XDG_CONFIG_HOME、XDG_DATA_HOMEを同じ作業ディスク内に設定。PowerShellはtelemetry/update check無効、NoProfileで実行。
+実行コマンド：`pwsh -NoLogo -NoProfile -File tools/dictionary/prepare_daily_dictionary.ps1`。終了0（約75秒）。lock検証、固定Wikipedia indexのハッシュ検証、親・子辞書revision検証、パッチ契約テスト3件、nico/pixiv・人名ハッシュ検証、dailyプロファイルチェック、syntax guard生成を通過。profile設定はdaily。生成手順がBUILD更新と表示したが、追跡ソースの実差分は0。
+生成物の来歴・ライセンスは[準備案](phase-01-preparation.md)の固定入力に従う。生成物を再配布・Git登録しない。成果物はローカルのgenerated/profiled配下に保持。
+
+| ファイル | bytes | 行数 | SHA-256 |
+|---|---:|---:|---|
+| dic-nico-pixiv-delta.txt | 3,118,386 | 49,275 | 67036560c6d82d5b7b3efae4d6af56fe1061babc43a1137b7501b11012969a3c |
+| mozcdic-ut-daily.txt | 66,644,125 | 1,082,557 | dca04c1b5a4518bfdda3bbe4b3a20fcafdd9e3449ddb9921f9200427232390b2 |
+| mozcdic-ut-personal-names-daily.txt | 2,727,540 | 54,123 | ac72222de099de9bef99c2eb2406927d1e0199f445f832563b5357c64d8cbd86 |
+| koyasi-syntax-guard.txt | 21,568 | 537 | 1d29b99c8b4bff45239e6ae2c5b97e43356fe0740a96c758f1020a32a28007fd |
+
+ネット監視は実行前後の全非loopbackインターフェースのrx_bytes差を2秒間隔で確認した。他プロセスの通信も含む保守的な参考値であり、辞書アプリ単体のHTTP payload実測値ではない。248MiB到達、辞書領域が10GiBの128MiB手前、全体59GiBのいずれかで子プロセス群を停止する監視を付けた。監視間隔による超過余地はあるが、今回は境界から十分小さい。
+辞書ステージ受信増分53,993,115 B（約51.49MiB、256MiB予算内）、辞書領域監視ピーク230,466,420 B（約219.79MiB、10GiB予算内）。終了時のdist/dictionaryは31,489,778 B、generatedは152,017,111 B。ツール等含む全体は979,387,302 B（約0.91GiB、60GiB予算内）。全て大規模キャッシュ・加工出力はディスク側で、/tmpを使用していない。
+監視スクリプト・実行ログ・入力manifestは作業ルートのlogs等にローカル保管し、Gitには含めない。個人入力・Hazkey辞書は取得していない。
+
+### D：通常ビルド・Bazelテスト・zip/ELFは未実施
+A未導入のため、今回の通常Bazel依存取得・コンパイルは開始していない。Bazel本体のインストールキャッシュ193,832,469 BはBの起動確認によるもので、通常ビルド成功の証拠ではない。Dの外部依存取得は0 B、成果物zipは未生成。IBus参考テストも未実施。既存Fcitx5/HazkeyへのIME登録・起動・切替・設定変更、Zenz実行、Phase 2着手なし。
+
+### 再開条件・報告
+B/Cは成功。Aは承認条件に合致したが対話認証が必要。通常ビルド未達を完了に変更しない。Aが実施可能になった時点で再シミュレーションと導入後差分確認を行い、Dを2GiB取得予算・全体60GiB以内で継続する。条件変更・予算超過見込みは停止して報告する。
+今回コミットするのは文書だけ。元adopt_ubuntuのステージ済み変更は保持。mainへマージしない。
