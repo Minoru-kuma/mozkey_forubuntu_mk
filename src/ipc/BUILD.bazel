@@ -64,7 +64,10 @@ mozc_cc_library(
     hdrs = ["linux_deadline.h"],
     target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//client:__pkg__"],
-    deps = [":ipc", ":ipc_cc_proto"],
+    deps = [
+        ":ipc",
+        ":ipc_cc_proto",
+    ],
 )
 
 mozc_cc_test(
@@ -74,10 +77,16 @@ mozc_cc_test(
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
-        ":ipc", ":ipc_path_manager", ":linux_deadline",
-        "//base:system_util", "//base:version", "//client",
-        "//client:client_interface", "//protocol:commands_cc_proto",
-        "//testing:gunit_main", "//testing:mozctest",
+        ":ipc",
+        ":ipc_path_manager",
+        ":linux_deadline",
+        "//base:system_util",
+        "//base:version",
+        "//client",
+        "//client:client_interface",
+        "//protocol:commands_cc_proto",
+        "//testing:gunit_main",
+        "//testing:mozctest",
     ],
 )
 

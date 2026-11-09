@@ -101,11 +101,11 @@ mozc_cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ] + mozc_select(
-        linux = ["//ipc:linux_deadline"],
         apple = [
             "//base/mac:mac_process",
             "//base/mac:mac_util",
         ],
+        linux = ["//ipc:linux_deadline"],
         windows = [
             "//base/win32:wide_char",
             "//base/win32:win_sandbox",
