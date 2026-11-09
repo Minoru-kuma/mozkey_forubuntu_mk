@@ -31,6 +31,8 @@
 
 #include "client/client.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ios>
@@ -116,6 +118,9 @@ Client::Client()
 }
 
 Client::~Client() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) { CloseLinuxFcitxSession(); return; }
+#endif
   set_timeout(kDeleteSessionOnDestructorTimeout);
   DeleteSession();
 }
@@ -135,6 +140,13 @@ void Client::InitRequestForSvsJapanese(bool use_svs) {
 }
 
 bool Client::EnsureConnection() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) {
+    commands::Input input; commands::Output output;
+    input.set_type(commands::Input::NO_OPERATION);
+    return LinuxCall(input, &output);
+  }
+#endif
   switch (server_status_) {
     case SERVER_OK:
     case SERVER_INVALID_SESSION:
@@ -186,6 +198,9 @@ bool Client::EnsureConnection() {
 }
 
 bool Client::EnsureSession() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return LinuxEnsureSession();
+#endif
   if (!EnsureConnection()) {
     return false;
   }
@@ -352,6 +367,9 @@ bool Client::SendCommandWithContext(const commands::SessionCommand &command,
 }
 
 bool Client::CheckVersionOrRestartServer() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return EnsureConnection();
+#endif
   commands::Input input;
   commands::Output output;
   input.set_type(commands::Input::NO_OPERATION);
@@ -368,6 +386,9 @@ bool Client::CheckVersionOrRestartServer() {
 
 bool Client::EnsureCallCommand(commands::Input *input,
                                commands::Output *output) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return LinuxEnsureCallCommand(input, output);
+#endif
   if (!EnsureSession()) {
     LOG(ERROR) << "EnsureSession failed";
     return false;
@@ -432,6 +453,9 @@ void Client::EnableCascadingWindow(const bool enable) {
 void Client::set_timeout(absl::Duration timeout) { timeout_ = timeout; }
 
 void Client::set_suppress_error_dialog(bool suppress) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return;
+#endif
   server_launcher_->set_suppress_error_dialog(suppress);
 }
 
@@ -543,6 +567,9 @@ bool Client::ClearUnusedUserPrediction() {
 }
 
 bool Client::Shutdown() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return false;
+#endif
   CallCommand(commands::Input::SHUTDOWN);
   if (!server_launcher_->WaitServer(server_process_id_)) {
     LOG(ERROR) << "Cannot shutdown the server";
@@ -563,6 +590,22 @@ bool Client::NoOperation() {
 
 // PingServer ignores all server status
 bool Client::PingServer() const {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) {
+    // A readiness probe shares the current operation deadline and does not
+    // invoke a launcher. State itself remains unchanged.
+    auto& state = *linux_fcitx_;
+    if (state.failed || state.closed || state.options.close_group->closing()) return false;
+    const bool outer = !state.operation;
+    if (outer) state.operation = LinuxDeadline::After(state.options.close_group->clock(),
+        std::chrono::milliseconds(std::clamp<int64_t>(absl::ToInt64Milliseconds(timeout_), 0, 100)));
+    commands::Input input; commands::Output output;
+    input.set_type(commands::Input::NO_OPERATION);
+    const bool result = const_cast<Client*>(this)->LinuxExchange(input, &output);
+    if (outer) state.operation.reset();
+    return result;
+  }
+#endif
   if (client_factory_ == nullptr) {
     return false;
   }
@@ -625,6 +668,9 @@ bool Client::CallAndCheckVersion(const commands::Input &input,
 }
 
 bool Client::Call(const commands::Input &input, commands::Output *output) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return LinuxCall(input, output);
+#endif
   MOZC_VLOG(2) << "commands::Input: " << std::endl << input;
 
   // don't repeat Call() if the status is either
@@ -715,6 +761,9 @@ bool Client::Call(const commands::Input &input, commands::Output *output) {
 }
 
 bool Client::StartServer() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return false;
+#endif
   if (server_launcher_ != nullptr) {
     return server_launcher_->StartServer(this);
   }
@@ -722,6 +771,9 @@ bool Client::StartServer() {
 }
 
 void Client::OnFatal(ServerLauncherInterface::ServerErrorType type) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return;
+#endif
   if (server_launcher_ != nullptr) {
     server_launcher_->OnFatal(type);
   }
@@ -736,6 +788,9 @@ void Client::InitInput(commands::Input *input) const {
 
 bool Client::CheckVersionOrRestartServerInternal(const commands::Input &input,
                                                  commands::Output *output) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return LinuxCall(input, output);
+#endif
   for (int trial = 0; trial < 2; ++trial) {
     const bool call_result = Call(input, output);
 
@@ -810,6 +865,15 @@ bool Client::CheckVersionOrRestartServerInternal(const commands::Input &input,
 }
 
 void Client::Reset() {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) {
+    // Recovery requires an explicitly prepared fresh client. Retain the known
+    // session only for bounded cleanup; never replay an uncertain operation.
+    linux_fcitx_->failed = true;
+    history_inputs_.clear();
+    return;
+  }
+#endif
   server_status_ = SERVER_UNKNOWN;
   server_protocol_version_ = 0;
   server_process_id_ = 0;
@@ -853,6 +917,9 @@ bool Client::LaunchToolWithProtoBuf(const commands::Output &output) {
 
 bool Client::LaunchTool(absl::string_view mode,
                         const absl::string_view extra_arg) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return false;
+#endif
   // Don't execute any child process if the parent process is not
   // in proper runlevel.
   if (!IsValidRunLevel()) {
@@ -912,6 +979,9 @@ bool Client::LaunchTool(absl::string_view mode,
 }
 
 bool Client::OpenBrowser(absl::string_view url) {
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (linux_fcitx_) return false;
+#endif
   if (!IsValidRunLevel()) {
     return false;
   }

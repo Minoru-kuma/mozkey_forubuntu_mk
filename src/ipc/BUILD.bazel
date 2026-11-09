@@ -34,12 +34,72 @@ load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load(
     "//:build_defs.bzl",
+    "mozc_cc_binary",
     "mozc_cc_library",
     "mozc_cc_test",
     "mozc_select",
 )
 
 package(default_visibility = ["//visibility:private"])
+
+# Explicit stop-boundary diagnostic; exit 2 means A5 is still unmet.
+mozc_cc_binary(
+    name = "linux_blocking_boundary_probe",
+    testonly = True,
+    srcs = ["linux_blocking_boundary_probe.cc"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":ipc",
+        ":linux_deadline",
+        "//base:version",
+        "//client",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_library(
+    name = "linux_deadline",
+    srcs = ["linux_deadline.cc"],
+    hdrs = ["linux_deadline.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//client:__pkg__"],
+    deps = [":ipc", ":ipc_cc_proto"],
+)
+
+mozc_cc_test(
+    name = "linux_deadline_test",
+    size = "small",
+    srcs = ["linux_deadline_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":ipc", ":ipc_path_manager", ":linux_deadline",
+        "//base:system_util", "//base:version", "//client",
+        "//client:client_interface", "//protocol:commands_cc_proto",
+        "//testing:gunit_main", "//testing:mozctest",
+    ],
+)
+
+# Explicit diagnostic only: exit 2 means the Phase 2A deadline gate failed.
+# No Fcitx instance, launcher, or installed server is used.
+mozc_cc_binary(
+    name = "ipc_deadline_probe",
+    testonly = True,
+    srcs = ["ipc_deadline_probe.cc"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":ipc",
+        ":ipc_path_manager",
+        "//base:system_util",
+        "//client",
+        "//client:client_interface",
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
+    ],
+)
 
 mozc_cc_library(
     name = "ipc",

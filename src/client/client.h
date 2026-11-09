@@ -45,6 +45,9 @@
 #include "client/client_interface.h"
 #include "composer/key_event_util.h"
 #include "ipc/ipc.h"
+#if defined(__linux__) && !defined(__ANDROID__)
+#include "ipc/linux_deadline.h"
+#endif
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 
@@ -56,6 +59,15 @@
 
 namespace mozc {
 namespace client {
+
+#if defined(__linux__) && !defined(__ANDROID__)
+struct LinuxFcitxOptions {
+  LinuxDeadlineEndpoint endpoint;
+  std::shared_ptr<LinuxFcitxCloseGroup> close_group;
+  // Injection for deterministic tests. A real frontend leaves this empty.
+  std::function<std::unique_ptr<IPCClientInterface>(const LinuxDeadline&)> factory;
+};
+#endif
 
 // default ServerLauncher implementation.
 // This class uses fork&exec (linux/mac) and CreateProcess() (Windows)
@@ -89,6 +101,13 @@ class Client : public ClientInterface {
  public:
   Client();
   ~Client() override;
+
+#if defined(__linux__) && !defined(__ANDROID__)
+  // Explicit opt-in. Never launches a process, uses a default profile, or
+  // performs automatic recovery/replay. The legacy constructor is unchanged.
+  explicit Client(LinuxFcitxOptions options);
+  bool CloseLinuxFcitxSession();
+#endif
 
   // Initializes `request_` with the flag.
   // This function should be called before EnsureSession.
@@ -256,6 +275,21 @@ class Client : public ClientInterface {
   // Remember the composition mode of input session for playback.
   commands::CompositionMode last_mode_;
   commands::Capability client_capability_;
+#if defined(__linux__) && !defined(__ANDROID__)
+  struct LinuxFcitxState {
+    LinuxFcitxOptions options;
+    std::optional<LinuxDeadline> operation;
+    bool failed = false;
+    bool closed = false;
+    uint32_t peer_pid = 0;
+  };
+  std::unique_ptr<LinuxFcitxState> linux_fcitx_;
+  bool LinuxEnsureSession();
+  bool LinuxEnsureCallCommand(commands::Input* input, commands::Output* output);
+  bool LinuxCall(const commands::Input& input, commands::Output* output,
+                 bool closing = false);
+  bool LinuxExchange(const commands::Input& input, commands::Output* output);
+#endif
 };
 
 class ClientFactory {

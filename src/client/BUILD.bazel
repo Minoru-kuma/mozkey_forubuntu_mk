@@ -60,6 +60,7 @@ mozc_cc_library(
     name = "client",
     srcs = [
         "client.cc",
+        "linux_fcitx_client.cc",
         "server_launcher.cc",
     ],
     hdrs = [
@@ -100,6 +101,7 @@ mozc_cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ] + mozc_select(
+        linux = ["//ipc:linux_deadline"],
         apple = [
             "//base/mac:mac_process",
             "//base/mac:mac_util",
