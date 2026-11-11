@@ -18,6 +18,8 @@
 
 ## 通常pushの限定範囲
 
+Fcitx5 5.1.19以上の開発ファイルが既にあるrunnerでは`run_fcitx5_api_probe.py`で独立C++ API試験を実行する。ない場合は未実行をnotice/summaryへ明記し、apt等で導入しない。stepの成功を実API検証成功へ読み替えず、ログのPASSを確認する。
+
 非同期IPCのモデルPoC `tests/ubuntu/test_async_ipc_poc.py`も毎回実行する。旧helper PoCの数値アサートはその診断資産として維持するが、新A5の受入判定は[設計案](a5-async-design.md)のレビュー後とする。
 
 Lintは既存buildifier処理。ZenzはPython単体試験とruntime_lock.py checkだけであり、直前の実測run 42563537869は開始から完了まで約12秒。モデル・辞書・scorerの取得起動はしないため軽量側に維持する。

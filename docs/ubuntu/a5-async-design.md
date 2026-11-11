@@ -11,7 +11,7 @@
 | helper process | 停止する検証を隔離できる | 安全な起動・取消・unload後の回収が必要 | 必須にしない。既存PoCは比較資料として保持 |
 | 事前準備だけ | 通常キーから初期化を減らせる | UI callbackで同期準備してもevent loopは止まる。metadataだけのキャッシュでは実接続の検証を代替できない | 上記と組み合わせる。単独解決とは扱わない |
 
-Fcitx5 5.1.19公開APIのaddIOEvent/addTimeEvent/addDeferEventを想定する。PoCはPython selectorsによる類似モデルであり、Fcitx5 API自体の動作確認ではない。初期設計の外部サービス案は現方針の対象外。
+Fcitx5 5.1.19公開APIのaddIOEvent/addTimeEvent/addDeferEventを使う。最初のPython PoCは類似モデルだったが、後続の独立C++ probeで実ライブラリの限定検証を行った（末尾参照）。初期設計の外部サービス案は現方針の対象外。
 
 ## 状態・所有権・安全条件
 
@@ -46,3 +46,15 @@ Fcitx5 5.1.19公開APIのaddIOEvent/addTimeEvent/addDeferEventを想定する。
 無負荷および記録したCPU/メモリ負荷で各1000要求以上、median/p95/p99/maxとOS・loop backend・sample数を保存する計画とする。今回の短いPoCはmaxのみで、p99や新基準達成の証明には使わない。負荷時に長時間停止を検出したら原因を分離し再レビューする。旧helper PoCの100/250msアサートは旧構成の診断として保存し、新A5の合格閾値へ流用しない。
 
 停止条件は、入力安全の違反、UI上の長時間同期待機、制御不能な準備I/Oや終了待ち、queue/resource増殖、他IME干渉、未検証のキー順序へ依存すること。参考値超過だけで停止しないが、原因不明の大きなloop停止は保留とする。新A5の合格は上記レビューと実測条件の合意後に判定する。製品統合・IME起動・次工程の承認は含まない。
+
+## 実Fcitx5 APIで確認できた範囲
+
+`tests/ubuntu/fcitx5_api_probe.cc`と`run_fcitx5_api_probe.py`は、既存Fcitx5Core/Utils 5.1.19をリンクする独立プログラム。Instance・addon・IME・実serverは起動せず、合成socketpairと合成frontendを使う。IO、Timer、Defer、exit、source破棄、focus/IC破棄後のwatch無効化を実APIで確認した。現在のbackendはsd-event（既存ライブラリのloop実装であり、systemdサービスを起動・接続する設計ではない）。libuv backendは未検証。
+
+単一スレッドのIO待ちで他イベントは進む。Timerのaccuracyを0にするとsd-eventの既定のcoalescingが入るため、5ms heartbeat試験はaccuracy=1usを明示する。callbackからの例外はbackendでfatalとなり得るため、fixtureの失敗もcallback外で判定する。Deferへ同期停止を移してもイベントループは止まる。350msの負例で最大周期遅れ350.095msを検出した。これは許容・合格事例ではない。
+
+InputContextManagerはInstanceなしで作成できる。合成ICのfocusIn/focusOut、UUID検索、破棄後watch無効化、KeyEventのrawKey/release/timeとfilterAndAccept、forwardKeyのpress→release→commit配送順序を確認した。ただし、`keyEvent`はその呼出し時点の結果を返すAPIであり、後で応答が来てから元の戻り値を変更できない。`forwardKey`を遅延して呼べることと、Wayland/X11/frontend/アプリをまたいで元のキーと同じ意味・順序になることは別である。
+
+`setBlockEventToClient`/InputContextEventBlockerは公開ヘッダーでfrontend専用とされる。合成frontendでqueue順序を試験しただけで、Mozkey addonが非同期キー消費のために使用してよいことを証明しない。focusを失ったICへの`keyEvent`はfalseとなったが、forwardKey/commit側に同等のfocus検査を期待せず、適用側でwatch・focus・epochを検査する。実engine経由のconsume、キー転送の再入、modifier/keyupのアプリ配送、実候補/未確定文字描画は未検証。
+
+移行判定は「非同期socket段階の限定実装候補は成立、A5製品実装への移行は保留」。一接続一要求の現行IPCでは新規接続ごとのkey/peer検証が必要であり、検証結果のキャッシュだけで省略しない。regular fileのopen/readやreadlinkの停滞をevent loopから隔離し、取消・unload時の所有権も成立させる準備方式は未確定。defer、O_NONBLOCK、単純workerへの移動だけで解決したとはしない。外部常駐サービスへ依存しない方針を維持し、実serverを使う版/session/起動・復旧検証も未実施のままとする。

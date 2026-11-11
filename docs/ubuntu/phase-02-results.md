@@ -435,3 +435,41 @@ profile/keyの同期I/O・実peer検証・起動準備は非同期socketだけ�
 YAML/inline構文・文書リンク・差分を検査し、対象変更のみcommit/pushする。actionlintは未導入。既存資産・元worktreeのステージ済み変更を保持し、辞書/モデル取得やBazelのフルビルドは行っていない。CI実行状態とpush後のremote HEAD一致は完了報告へ記載する。
 
 応答到着前の進行も明示的なアサートに追加した最終再試験は5テスト成功、3.323秒。350ms遅延の完了355.108msまでに70回の周期イベントを処理した。全scenarioの最大周期遅れ0.324ms、最大IO callback 0.138ms、即応10.284msだった。上表は最初の成功測定としてそのまま保持する。
+
+## 実Fcitx5 API限定検証（製品統合前）
+
+**判定：実ライブラリ上のsocket待ち・取消・IC寿命の限定API検証は成功。準備I/Oと実アプリのキー配送契約は未解決で、A5実装への移行は保留・レビュー待ち。** 基点`bcfc5519fd80e7503515687db829dee3be35ebac`、remote mainは`b489fca1561bf12ff6b43205378220163d71c21c`。開始時worktreeはclean。ユーザー承認はAPI検証・故障注入・記録と作業ブランチへの反映まで。
+
+### 実行した検証
+
+`tests/ubuntu/fcitx5_api_probe.cc`を既存pkg-configのFcitx5Core/Utils 5.1.19、g++のC++20/O2/Wall/Wextra/Werrorで単独コンパイル。`/usr/bin/python3 tests/ubuntu/run_fcitx5_api_probe.py`が一時領域でビルドして最大15秒で実行・回収する。新規依存取得、Bazelビルド、Instance/IME/実server起動はない。9つのloopシナリオ＋InputContext契約試験と、全loop終了後のFD数不変を確認した。実装backendはsd-eventで、systemdサービスの利用・起動はしない。libuvは未検証。
+
+| 実APIの合成シナリオ | 応答完了 | 最大IO callback | 5ms周期の最大遅れ | 周期回数 / commit回数 |
+|---|---:|---:|---:|---|
+| 即応（10ms予定） | 10.115ms | 0.022ms | 0.174ms | 108 / 1 |
+| 350ms応答遅延 | 350.105ms | 0.031ms | 0.164ms | 108 / 1 |
+| 350/410msの断片応答 | 410.110ms | 0.039ms | 0.178ms | 108 / 1 |
+| 切断 | 確定なし | 0.038ms | 0.338ms | 108 / 0 |
+| 無応答・450msで取消 | 確定なし | 0ms | 0.341ms | 108 / 0 |
+| 50msで取消・古いDefer完了 | 確定なし | 0ms | 2.259ms | 108 / 0 |
+| focusOut後の遅延完了 | 確定なし | 0.024ms | 0.343ms | 108 / 0 |
+| IC破棄後の遅延完了 | 確定なし | 0.030ms | 0.375ms | 107 / 0 |
+| 負例：Defer内の350ms停止 | 375.292ms | 0.028ms | **350.095ms** | 39 / 1 |
+
+遅延応答の前に69回、断片応答の前に81回のheartbeatが進んだ。EOFからDeferへ完了を戻し、重複Deferでもcommitは一度だけ。取消/focusOut/破棄では世代・watch・focusで完了を拒否し、fixture preeditを保持した。Timer sourceを発火前に破棄して未発火を確認し、IO sourceを無効化してFDを閉じ、exitイベントでwatcherを停止、loop破棄後のFD数も一致した。実addonのunloadではなく独立プログラムの所有権試験である。負例は停止を正しく検出したという診断結果であって、350ms停止を許容するものではない。
+
+初回sandbox内はsocket送信拒否からfixtureが失敗し、callback内例外をbackendがfatalとして扱った。callback外で失敗判定するよう修正。sandbox外実行の自動承認審査は一度timeoutし、許可された1回の再試行で実行できた。初回のsandbox外実行はTimer accuracy=0でcoalescingが入り周期条件に失敗。accuracy=1usを明示した最終実装では上記すべて成功。失敗を時間基準変更で隠していない。
+
+### InputContext・キー契約：実行と静的確認の区別
+
+実InputContextManager（instance()==nullptr）と合成InputContextのfrontend実装で、UUID検索・focusIn/focusOut・破棄後watch/UUID失効、KeyEventのrawKey/time/filterAndAcceptを実行。frontend用setBlockEventToClientでpress(123)→release(124)→commitのqueueと配送順序を実行確認した。focusなしのkeyEventはfalseだった。[公式5.1.19 InputContext実装](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx/inputcontext.cpp)と導入済みヘッダーも照合した。
+
+一方、実engineを通すkeyEvent/consumed判定、元の物理キーと遅延forwardKeyの等価性、Wayland/X11/アプリの順序・再入・modifier、実preedit描画、focus跨ぎの入力救済、実serverの版/session整合は未実行。frontend専用のblockerをaddonへ転用しない。forwardKey/commit自体のfocus保護を仮定せず、適用側の寿命/世代検査が必要。
+
+### 準備I/Oの成立性・移行判定
+
+IO/Timer/Deferのsocket段階は成立する限定実装候補。しかし同期open/openat/fstat/read/readlinkをDeferへ移すだけでは入力loopを止めることを負例で確認した。SO_PEERCREDの照合だけで実体パス検証を省略せず、cached metadataから別socketへ再接続して検証済みと扱わない。一接続一要求の現行protocolのため、新規接続の準備方式は毎回の実接続検証と両立する必要がある。安全な同一プロセス内準備workerの終了/コード寿命も未確定。実filesystemの停滞や実peer検証の障害注入は今回未実行で、負例のnanosleepはそのモデルに過ぎない。
+
+100ms/250msは参考値、APIの低負荷短時間測定は新A5のp99や合格の証明ではない。準備I/Oと物理キー契約を解決するまでは本格統合へ移行しない。systemd・外部常駐サービスへ依存せず、A5合格/次工程はレビュー後とする。
+
+軽量CIではFcitx5 5.1.19以上の開発ファイルが既にある場合のみ同じrunnerを実行し、未導入ならNOT EXECUTEDをnotice/summaryへ出す。apt追加をせず、step成功と実API成功を混同しない。YAML/runner構文・差分を検査する。既存52ケースの製品コードは変更しておらず、既存資産・元worktreeの変更を保持。実IME/Hazkey/システム設定変更、辞書/モデル取得、次工程は0。push後CI結果とremote HEAD一致は完了報告に記す。

@@ -73,6 +73,15 @@ jobs:
       - name: Run event-driven IPC model PoC
         timeout-minutes: 2
         run: /usr/bin/python3 tests/ubuntu/test_async_ipc_poc.py
+      - name: Probe installed Fcitx5 APIs without launching an IME
+        timeout-minutes: 2
+        run: |
+          if pkg-config --exists 'Fcitx5Core >= 5.1.19' 'Fcitx5Utils >= 5.1.19'; then
+            /usr/bin/python3 tests/ubuntu/run_fcitx5_api_probe.py
+          else
+            echo '::notice::Fcitx5 5.1.19+ development files unavailable; real API probe NOT EXECUTED'
+            echo 'Fcitx5 API probe: NOT EXECUTED (5.1.19+ development files unavailable).' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Restore Bazel dependency and action caches
         if: steps.changes.outputs.run == 'true'
         uses: actions/cache@v5
