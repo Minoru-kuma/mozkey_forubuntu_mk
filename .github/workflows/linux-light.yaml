@@ -66,6 +66,10 @@ jobs:
               f.write(f'Commit: `{actual}`\n\nUbuntu 24.04 limited regression; not Fcitx5 acceptance.\n\n')
               f.write('Targets: ' + ', '.join(targets) if run else 'No source changes: no Bazel build required.')
           PY
+      - name: Run isolated helper process PoC
+        # This is a synthetic socketpair test, not a product integration test.
+        timeout-minutes: 2
+        run: /usr/bin/python3 tests/ubuntu/test_linux_helper_poc.py
       - name: Restore Bazel dependency and action caches
         if: steps.changes.outputs.run == 'true'
         uses: actions/cache@v5

@@ -1,5 +1,7 @@
 # Phase 2 実行結果
 
+**最新状態：helperのaddon unload後までの回収責任を確認できず、今回の明示的な停止条件によりA5の隔離実装を開始しない。既存PoCの軽量CI組込みと調査記録だけを実施し、A5未達・工程1停止を維持する。詳細は末尾を参照。**
+
 **最新状態（2026-11-11）：helper processの限定PoCは合成条件の8ケースで成功。実検証・製品統合は未実施で、A5未達・工程1停止を維持する。詳細は末尾「helper process限定PoC」を参照。**
 
 ## 最新の判定（2026-11-05）
@@ -376,3 +378,25 @@ PoCは`tests/ubuntu/test_linux_helper_poc.py`だけで完結するLinux用の単
 - `fork`/`exec`は診断用の単一スレッドPython実装。forkからexecまでPythonコードが動くため、マルチスレッドFcitx5内でのasync-signal-safeな起動方式を示すものではない。fork/pidfd_open自体のカーネル待ちもdeadlineで中断できない。exec前停止は親側で待っていないことのモデルである。
 - このownerは回収まで生存する前提。addon unload・Fcitx5終了後も回収責任を持つ主体、長期停止時の資源上限の実運用、InputContext寿命・preedit・重複確定、実server性能・既存client deadline統合、Windows/macOSへの影響は未実装・未検証。子が終了不能なら新規作成を止めるが、回収完了を保証しない。
 - 通常100ms・障害250msは限定診断の実測であり、実Fcitx5 event loopの次dispatchや実IMEの要求全体ではない。helper採用、A5合格、工程2〜6・2B/2C/3への進行を意味しない。
+
+## A5 lifecycle再検討とPoCの軽量CI組込み（2026-11-11）
+
+**最新判定：安全なunload後の回収責任を確定できず、ユーザー指定の停止条件に該当。A5未達・工程1停止を維持する。** 今回の承認対象は、マルチスレッドFcitx5からの起動、addon unload後を含む所有/取消/終了回収、検証済み接続FDの移譲の3点を一体で成立させる設計と、その成立範囲の隔離実装・検証、既存PoCの軽量CI組込みである。基点は`ac608bfe29906efb8b525b60eddb7214473b72d8`、リモートmainは`b489fca1561bf12ff6b43205378220163d71c21c`。対象worktreeは開始時cleanだった。
+
+### 設計監査と停止理由
+
+- 既存Python PoCは単一スレッドの直接の子をownerが生存中に回収する前提で、fork後にPythonコードを実行する。マルチスレッドFcitx5での安全なfork/execやaddon unload後の所有権を証明しない。
+- UbuntuにあるFcitx5 5.1.19の`EventLoop`公開APIはIO/time/defer等を提供するが、addonより長寿命の子の所有・回収サービスを示さない。公式の[5.1.19 startProcess実装](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx-utils/misc.cpp)は親が`waitpid(..., 0)`で中間子を待ち、helperの所有handleを返さない。event loop上の非ブロッキング起動と所有権契約の代わりにはならない。これは同APIが他の仕組みを提供しないことの網羅的証明ではない。
+- 直接子をpidfdで識別し、期限切れ時は取消・SIGKILL、`waitpid(WNOHANG)`で回収確認し、回収前は同一ownerで次の子を起動しない契約は、ownerが生きている間の候補。SIGKILLは割込み不能I/O中の即時終了を保証せず、pidfd自体もwait/reapの責任を引き受けない。Fcitx5の別のSIGCHLD処理との共存、既存のownerより長いlifetime、unload後に継続する回収先が未確定である。
+- 検討候補は、addonとは独立した生存期間を持つ信頼できる監督主体がhelperを所有し、channel切断で取消、非ブロックにreapし、未回収時は全体の上限を保つ構成。別サービスやFcitx5本体への統合が必要か、その起動・クラッシュ・再起動・unload時の回収、親死亡時の再親化、namespace/subreaper、FDとコードの寿命を実環境で確定する必要がある。今回のシステム変更・製品統合禁止の範囲では、この主体を用意・検証できない。
+- helper側で明示profileをfd基準で辿りkeyの権限/種類・PID・版を確認し、接続済みsocketのSO_PEERCREDと`/proc/PID/exe`を照合、その同一FDをSCM_RIGHTSで渡す案は候補に留まる。世代・期限・不正/過剰FDの拒否、所有権の移譲、プロセス終了・PID再利用・execと検証の競合、異製品拒否を同じ契約で検証しなければならない。実serverを使った版・session整合は今回検証できない。
+
+3点を満たすlifecycleは確定していないため、新しい隔離helperや実peer検証への接続は実装しない。有限のfixtureを終了できたことを、addon unload後の回収保証やA5合格に読み替えない。通常要求100ms・障害時loop復帰250msの初期目標も維持する。52ケースの対象コードは変更せず、過去の成功記録を参照し今回は再実行していない。
+
+### 既存PoCとCI
+
+`tests/ubuntu/test_linux_helper_poc.py`を`.github/workflows/linux-light.yaml`に独立stepとして追加し、文書のみの変更でも実行する。Bazel限定テストの選択条件・依存取得・既存製品targetは変更していない。Python標準ライブラリのみ、合成socketpairのみで実IME・実serverを起動しない。[CI運用](ci-policy.md)にも対象を記録した。
+
+ローカルでは`/usr/bin/python3 tests/ubuntu/test_linux_helper_poc.py`を以前と同じ理由でsandbox外で実行した。最初の実行は8ケース中2失敗（検証停止の到達通知が80ms以内に得られず、正常転送でも100ms以内にFDを取得できなかった）。同じ条件で再実行すると8ケース成功、正常20回の最大78.002ms、exec前停止の親復帰1.180ms、350ms停止時の親復帰100.166ms、回収確認5.158ms、取消0.958msだった。失敗を消去・閾値緩和していない。確認時load averageは5.59/2.39/1.79、CPU数14だったが、それが失敗原因と断定できない。一般OSのスケジューリングとプロセス起動費用により、この100ms試験が環境負荷に敏感であることは未解決。失敗runを含む結果はA5の目標達成の証明ではない。
+
+YAML構文、追加step、トリガー/既存stepの不変性と`git diff --check`を検査する。actionlintは未導入で、追加取得・フルビルドは行わない。push後のGitHub Actions結果と静的検査は区別し、完了報告に記す。既存資産、元worktreeの未コミット変更を保持し、実IME起動、システム変更、工程2〜6/2B/2C/3、本格統合には進まない。

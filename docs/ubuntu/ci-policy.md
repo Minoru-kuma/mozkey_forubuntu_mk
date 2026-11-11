@@ -20,7 +20,7 @@
 
 Lintは既存buildifier処理。ZenzはPython単体試験とruntime_lock.py checkだけであり、直前の実測run 42563537869は開始から完了まで約12秒。モデル・辞書・scorerの取得起動はしないため軽量側に維持する。
 
-Linux limitedはUbuntu 24.04・Bazel 9.0.2・jobs=2・最大20分。src変更時は既存system_util/process_mutex/ipc_path_manager/ipc/client/linux_deadlineの6ターゲット、config変更時はconfig_handler/stats_config_util、zenz変更時はzenz_unix_socket_pathも追加する。これは限定回帰であり、全変更の網羅的テストではない。session/engine等の機能変更は関連試験の選定をレビューし、必要ならフルCIを早める。
+Linux limitedはUbuntu 24.04・Bazel 9.0.2・jobs=2・最大20分。src変更時は既存system_util/process_mutex/ipc_path_manager/ipc/client/linux_deadlineの6ターゲット、config変更時はconfig_handler/stats_config_util、zenz変更時はzenz_unix_socket_pathも追加する。さらに`tests/ubuntu/test_linux_helper_poc.py`を毎回実行する。これは合成socketpairを使うPoCで、実IMEの検証ではない。これらは限定回帰であり、全変更の網羅的テストではない。session/engine等の機能変更は関連試験の選定をレビューし、必要ならフルCIを早める。
 
 文書のみのpushではチェックjob自体は作成し、Bazel関連stepだけを省略する。新規branch・比較元不明時は限定集合を実行する。PRはbase SHAと実際のmerge SHAとの差分を見る。full buildの辞書artifact、Phase 1・2Aのローカルcache、個人profileには依存しない。専用のrepository/disk cacheを利用し、キャッシュミス時は限定targetに必要なBazel依存だけを取得する。update_deps全体、辞書全面生成、package、実IMEは実行しない。cold cache時のコンパイル負荷は残る。
 
