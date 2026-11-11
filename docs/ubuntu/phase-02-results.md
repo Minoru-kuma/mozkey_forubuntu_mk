@@ -1,5 +1,7 @@
 # Phase 2 実行結果
 
+**現行方針：ユーザー指示でA5を入力イベントループの長時間停止防止へ再設計。100ms/250msは参考値として保持する。[新設計・受入条件案](a5-async-design.md)と末尾のPoC結果はレビュー待ちで、A5合格・製品統合・工程再開は未承認。以下の旧停止条件と実測は履歴である。**
+
 **最新状態：helperのaddon unload後までの回収責任を確認できず、今回の明示的な停止条件によりA5の隔離実装を開始しない。既存PoCの軽量CI組込みと調査記録だけを実施し、A5未達・工程1停止を維持する。詳細は末尾を参照。**
 
 **最新状態（2026-11-11）：helper processの限定PoCは合成条件の8ケースで成功。実検証・製品統合は未実施で、A5未達・工程1停止を維持する。詳細は末尾「helper process限定PoC」を参照。**
@@ -400,3 +402,36 @@ PoCは`tests/ubuntu/test_linux_helper_poc.py`だけで完結するLinux用の単
 ローカルでは`/usr/bin/python3 tests/ubuntu/test_linux_helper_poc.py`を以前と同じ理由でsandbox外で実行した。最初の実行は8ケース中2失敗（検証停止の到達通知が80ms以内に得られず、正常転送でも100ms以内にFDを取得できなかった）。同じ条件で再実行すると8ケース成功、正常20回の最大78.002ms、exec前停止の親復帰1.180ms、350ms停止時の親復帰100.166ms、回収確認5.158ms、取消0.958msだった。失敗を消去・閾値緩和していない。確認時load averageは5.59/2.39/1.79、CPU数14だったが、それが失敗原因と断定できない。一般OSのスケジューリングとプロセス起動費用により、この100ms試験が環境負荷に敏感であることは未解決。失敗runを含む結果はA5の目標達成の証明ではない。
 
 YAML構文、追加step、トリガー/既存stepの不変性と`git diff --check`を検査する。actionlintは未導入で、追加取得・フルビルドは行わない。push後のGitHub Actions結果と静的検査は区別し、完了報告に記す。既存資産、元worktreeの未コミット変更を保持し、実IME起動、システム変更、工程2〜6/2B/2C/3、本格統合には進まない。
+
+## A5方針変更：イベント駆動IPCの設計と隔離PoC
+
+基点`1a3f25c7c653f8d7b2d923c4ed2816497bfa3672`、同worktreeは開始時clean、remote mainは`b489fca1561bf12ff6b43205378220163d71c21c`。ユーザーの追加指示で100ms/250msを参考値へ変更し、Fcitx5内で完結するイベント駆動IPCを第一候補にした。systemd・外部常駐サービスに依存しない。AGENTS.md、PLANS.md、Phase 2計画の現行契約を更新し、過去の結果は履歴として保持した。
+
+詳細は[a5-async-design.md](a5-async-design.md)。IOイベント＋timer、worker、helper、準備分離を比較し、IC/要求世代、有限queue、preedit保持、一度だけのcommit/キー処理、取消/終了の所有権を記載した。入力/IO callbackのp99 5ms・最大20ms、heartbeat遅れp99 20ms・最大50ms等は低負荷時のレビュー候補であり、まだ確定基準ではない。通常要求1秒・準備2秒の期限も検討案であって、同期待機の許容時間ではない。100ms/250msの参考値と安全条件は削除しない。
+
+### 新PoCと実測
+
+`tests/ubuntu/test_async_ipc_poc.py`は単一スレッドselectors/socketpairの模型。別スレッド・子process・実server・Fcitx5を使わない。合成peerの遅延は同じloopの予定時刻で表し、UIは文字列/commit台帳で表す。recvはnonblocking、EOFで完了、4KiB上限のfixtureを用い、各dispatchで有限量を処理する。既存helper PoC・52ケース・製品ソースは変更しない。軽量CIへ独立stepを追加した。
+
+sandbox内は送信EPERMにより失敗し、sandbox外で`/usr/bin/python3 tests/ubuntu/test_async_ipc_poc.py`を実行した。5テスト（不正/過大応答のsubcaseを含め6シナリオ）、3.322秒、すべて成功。
+
+| fixture | 要求完了/打切り | 最大IO callback | 5ms周期の最大遅れ | 周期イベント数 |
+|---|---|---:|---:|---:|
+| 即応（10ms予定） | 10.319ms、commit 1回 | 0.047ms | 0.310ms | 107 |
+| 350ms遅延 | 351.923ms、commit 1回 | 0.111ms | 0.337ms | 107 |
+| 50ms後取消、350ms後に古い完了を模擬 | commit 0、preedit保持 | 0ms | 0.382ms | 108 |
+| 不正応答 | commit 0、preedit保持 | 0.140ms | 0.294ms | 108 |
+| 過大応答 | commit 0、preedit保持 | 0.077ms | 0.324ms | 108 |
+| 無応答、450msで取消 | commit 0、preedit保持 | 0ms | 0.151ms | 108 |
+
+正常/遅延応答の完了をさらに2回配送する模型でもcommitは1回、取消後の完了は0回であった。350ms応答待ちが他イベントの350ms停止を生じないことは、この模型で確認できた。旧100ms応答目標を超えたことだけでは、新しい応答性方針の不合格とはしない。測定は短い低負荷試験でp99を算出しておらず、全準備/アプリ入力/実Fcitx5の受入達成ではない。
+
+### 残件・停止条件・保護
+
+profile/keyの同期I/O・実peer検証・起動準備は非同期socketだけでは解決しない。timer/deferへの単純移動で解消したとは扱わない。実接続FDの安全な準備、cold start、ログsink、実Fcitx5のkey consume/forward順序、keyup・modifier・focus/Wayland差、unload時の資源回収とserver session残存は未検証。物理キー全面非同期化はこれらを確認するまで製品へ採用しない。旧helperの終了責任の未解決は残るがhelper自体は必須としない。
+
+時間基準の変更を理由に入力消失・二重確定・古い応答・他IME干渉・無期限joinを許容しない。制御不能な準備I/Oや未確定のキー順序を製品へ接続する前に停止し再レビューする。今回の許可は設計と隔離PoCだけであり、新A5合格・本格統合・IME導入/起動・システム変更・次工程へは進まない。
+
+YAML/inline構文・文書リンク・差分を検査し、対象変更のみcommit/pushする。actionlintは未導入。既存資産・元worktreeのステージ済み変更を保持し、辞書/モデル取得やBazelのフルビルドは行っていない。CI実行状態とpush後のremote HEAD一致は完了報告へ記載する。
+
+応答到着前の進行も明示的なアサートに追加した最終再試験は5テスト成功、3.323秒。350ms遅延の完了355.108msまでに70回の周期イベントを処理した。全scenarioの最大周期遅れ0.324ms、最大IO callback 0.138ms、即応10.284msだった。上表は最初の成功測定としてそのまま保持する。

@@ -3,6 +3,8 @@
 [共通ルール](AGENTS.md) / [Phase 0調査](docs/ubuntu/phase-00-audit.md) / [Phase 1仕様](docs/ubuntu/phase-01-build.md) / [Phase 2詳細計画](docs/ubuntu/phase-02-plan.md)
 
 ## 対象と承認
+ユーザーの最新指示でA5は入力イベントループの長時間停止防止を中心に再設計。100ms/250msは参考測定値へ変更し、Fcitx5内の非同期IPCを優先する。設計・隔離PoC・故障注入と作業ブランチへの反映を承認。新受入基準は[レビュー案](docs/ubuntu/a5-async-design.md)であり、A5合格・製品統合・次工程は承認しない。以下の旧数値目標・停止理由は履歴として保持する。
+
 2026-11-11にCI workflowと開発運用文書の実行方針変更・限定検証・作業ブランチへのcommit/pushを承認。通常pushは軽量、Phase完了・main統合前は全6系統フルCIとする（[CI運用](docs/ubuntu/ci-policy.md)）。A5未達・工程1停止と後続Phaseの未承認状態は維持する。
 
 2026-11-09の最新指示で、既存Phase 2A工程1の変更と結果・設計レビュー記録を`feat/ubuntu-phase2a`へコミット・プッシュすることを承認。今後も承認済み作業の完了時に作業ブランチへ都度反映する（[Git運用](AGENTS.md)）。以下の過去のcommit/push禁止は、この指示の範囲で更新された。A5未達・工程1停止は維持し、helper実装・再ビルド・工程2〜6・2B/2C/3・IME起動・システム変更は再開しない。

@@ -18,6 +18,8 @@
 
 ## 通常pushの限定範囲
 
+非同期IPCのモデルPoC `tests/ubuntu/test_async_ipc_poc.py`も毎回実行する。旧helper PoCの数値アサートはその診断資産として維持するが、新A5の受入判定は[設計案](a5-async-design.md)のレビュー後とする。
+
 Lintは既存buildifier処理。ZenzはPython単体試験とruntime_lock.py checkだけであり、直前の実測run 42563537869は開始から完了まで約12秒。モデル・辞書・scorerの取得起動はしないため軽量側に維持する。
 
 Linux limitedはUbuntu 24.04・Bazel 9.0.2・jobs=2・最大20分。src変更時は既存system_util/process_mutex/ipc_path_manager/ipc/client/linux_deadlineの6ターゲット、config変更時はconfig_handler/stats_config_util、zenz変更時はzenz_unix_socket_pathも追加する。さらに`tests/ubuntu/test_linux_helper_poc.py`を毎回実行する。これは合成socketpairを使うPoCで、実IMEの検証ではない。これらは限定回帰であり、全変更の網羅的テストではない。session/engine等の機能変更は関連試験の選定をレビューし、必要ならフルCIを早める。
