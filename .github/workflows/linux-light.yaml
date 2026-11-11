@@ -1,0 +1,87 @@
+name: CI for Linux (limited)
+run-name: "Linux limited | ${{ github.ref }} | ${{ github.sha }}"
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-limited-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  limited-tests:
+    # Always create this check, including documentation-only changes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ANDROID_NDK_HOME: ''
+      USE_BAZEL_VERSION: '9.0.2'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Record revision and select bounded regression set
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          head, base = os.environ['HEAD_SHA'], os.environ['BASE_SHA']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert actual == head, (actual, head)
+          valid_base = base and set(base) != {'0'} and subprocess.run(
+              ['git', 'cat-file', '-e', base + '^{commit}'], capture_output=True).returncode == 0
+          if valid_base:
+              paths = subprocess.check_output(['git', 'diff', '--name-only', base, head], text=True).splitlines()
+          else:
+              # New branch / dispatch / unavailable base: conservative bounded run.
+              paths = ['src/']
+          run = os.environ['EVENT_NAME'] == 'workflow_dispatch' or any(
+              x.startswith('src/') or x == '.github/workflows/linux-light.yaml' for x in paths)
+          targets = ['//base:system_util_test', '//base:process_mutex_test',
+                     '//ipc:ipc_path_manager_test', '//ipc:ipc_test',
+                     '//client:client_test', '//ipc:linux_deadline_test']
+          if any(x.startswith('src/config/') for x in paths):
+              targets += ['//config:config_handler_test', '//config:stats_config_util_test']
+          if any(x.startswith('src/zenz/') for x in paths):
+              targets += ['//zenz:zenz_unix_socket_path_test']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('run=' + str(run).lower() + '\n')
+          Path(os.environ['RUNNER_TEMP'], 'limited-targets.txt').write_text('\n'.join(targets))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'Commit: `{actual}`\n\nUbuntu 24.04 limited regression; not Fcitx5 acceptance.\n\n')
+              f.write('Targets: ' + ', '.join(targets) if run else 'No source changes: no Bazel build required.')
+          PY
+      - name: Restore Bazel dependency and action caches
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/mozkey-linux-limited
+          key: linux-limited-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/MODULE.bazel', 'src/MODULE.bazel.lock', 'src/.bazelrc', 'src/bazel/**') }}-${{ github.sha }}
+          restore-keys: |
+            linux-limited-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/MODULE.bazel', 'src/MODULE.bazel.lock', 'src/.bazelrc', 'src/bazel/**') }}-
+      - name: Run limited unit tests without dictionary or package generation
+        if: steps.changes.outputs.run == 'true'
+        working-directory: src
+        shell: bash
+        run: |
+          mapfile -t targets < "$RUNNER_TEMP/limited-targets.txt"
+          bazelisk test "${targets[@]}" --config release_build --jobs=2 \
+            --test_output=errors --test_timeout=60 \
+            --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \
+            --disk_cache="$HOME/.cache/mozkey-linux-limited/actions" \
+            --repo_env=PKG_CONFIG_PATH=

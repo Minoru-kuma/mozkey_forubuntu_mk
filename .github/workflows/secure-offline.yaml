@@ -1,22 +1,22 @@
 name: Secure Offline Checks
 
+# This existing default-branch dispatch entry also bootstraps full CI on a
+# work branch before the new dispatch triggers have been merged into main.
 on:
   push:
-    branches:
-      - main
-      - "feature/**"
-      - "fix/**"
-      - "harden/**"
-      - "chore/**"
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
+
+run-name: "${{ github.workflow }} | ${{ github.ref }} | ${{ github.sha }}"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  group: secure-offline-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   source_check:
@@ -241,3 +241,27 @@ jobs:
           name: Mozc64.msi
           path: src/bazel-bin/win32/installer/Mozc64.msi
           if-no-files-found: warn
+
+  full_linux:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/linux.yaml
+
+  full_windows:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/windows.yaml
+
+  full_macos:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/macos.yaml
+
+  full_android:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/android.yaml
+
+  full_lint:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/lint.yaml
+
+  full_zenz_runtime_lock:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/zenz_runtime_lock.yml

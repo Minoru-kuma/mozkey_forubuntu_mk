@@ -3,13 +3,18 @@ name: Zenz runtime lock integrity (read-only)
 on:
   push:
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+run-name: "${{ github.workflow }} | ${{ github.ref }} | ${{ github.sha }}"
 
 permissions:
   contents: read
 
 concurrency:
-  group: zenz-runtime-lock-${{ github.ref }}
-  cancel-in-progress: true
+  group: zenz-runtime-lock-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   verify-pinned-runtime:

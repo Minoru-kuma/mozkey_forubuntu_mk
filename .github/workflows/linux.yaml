@@ -1,16 +1,24 @@
 name: CI for Linux
 # https://github.com/google/mozc/blob/master/docs/build_mozc_for_linux.md
 
-# Run on push.
-on: push
+# Full builds run at integration boundaries; lint also runs on branch pushes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+run-name: "${{ github.workflow }} | ${{ github.ref }} | ${{ github.sha }}"
 
 permissions:
   contents: read
 
 # Prevent previous workflows from running.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  group: linux-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   prepare_daily_dictionary:
@@ -37,7 +45,7 @@ jobs:
       - name: Upload daily dictionary
         uses: actions/upload-artifact@v6
         with:
-          name: daily-dictionary
+          name: daily-dictionary-linux
           path: |
             src/data/dictionary_koyasi/generated/**
             dist/dictionary/**
@@ -59,7 +67,7 @@ jobs:
       - name: Download daily dictionary
         uses: actions/download-artifact@v6
         with:
-          name: daily-dictionary
+          name: daily-dictionary-linux
           path: .
 
       - name: Setup
@@ -98,7 +106,7 @@ jobs:
       - name: Download daily dictionary
         uses: actions/download-artifact@v6
         with:
-          name: daily-dictionary
+          name: daily-dictionary-linux
           path: .
 
       - name: Setup

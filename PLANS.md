@@ -3,6 +3,8 @@
 [共通ルール](AGENTS.md) / [Phase 0調査](docs/ubuntu/phase-00-audit.md) / [Phase 1仕様](docs/ubuntu/phase-01-build.md) / [Phase 2詳細計画](docs/ubuntu/phase-02-plan.md)
 
 ## 対象と承認
+2026-11-11にCI workflowと開発運用文書の実行方針変更・限定検証・作業ブランチへのcommit/pushを承認。通常pushは軽量、Phase完了・main統合前は全6系統フルCIとする（[CI運用](docs/ubuntu/ci-policy.md)）。A5未達・工程1停止と後続Phaseの未承認状態は維持する。
+
 2026-11-09の最新指示で、既存Phase 2A工程1の変更と結果・設計レビュー記録を`feat/ubuntu-phase2a`へコミット・プッシュすることを承認。今後も承認済み作業の完了時に作業ブランチへ都度反映する（[Git運用](AGENTS.md)）。以下の過去のcommit/push禁止は、この指示の範囲で更新された。A5未達・工程1停止は維持し、helper実装・再ビルド・工程2〜6・2B/2C/3・IME起動・システム変更は再開しない。
 
 2026-10-30の追加指示で第一対象をUbuntu 26.04 LTS（x86_64）+ Fcitx5に確定。ユーザーはFcitx5 + Hazkeyを日常利用している。Hazkeyの設定・個人辞書・入力環境を保護し、Hazkeyを残したままMozkeyを独立したIMEとして追加する。Mozc導入済みは前提にしない。IBusは既存実装の参考・比較対象で、受入対象外。24.04は既存CIの比較基準。Phase番号は維持し、Phase 1にFcitx5統合調査、Phase 2に承認後の最小統合・初期入力試験と明示承認後の実ホスト共存検証を置く。

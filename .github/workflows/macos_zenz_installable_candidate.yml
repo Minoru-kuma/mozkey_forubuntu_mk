@@ -1,11 +1,6 @@
 name: macOS Zenz installable candidate (no installation)
 
 on:
-  push:
-    branches:
-      - ci/llama-v070-arm64-native
-    paths:
-      - '.github/workflows/macos_zenz_installable_candidate.yml'
   workflow_dispatch:
 
 permissions:

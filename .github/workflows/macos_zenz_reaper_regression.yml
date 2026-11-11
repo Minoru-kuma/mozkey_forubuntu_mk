@@ -2,6 +2,7 @@ name: macOS Zenz scorer reaper regression
 
 on:
   push:
+    branches: [main]
     paths:
       - '.github/workflows/macos_zenz_reaper_regression.yml'
       - 'src/session/BUILD.bazel'
@@ -17,6 +18,7 @@ on:
       - 'src/session/zenz_client_factory.cc'
       - 'src/session/zenz_client_factory.h'
       - 'src/session/zenz_client_factory_test.cc'
+  workflow_dispatch:
 
 permissions:
   contents: read
