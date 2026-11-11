@@ -36,9 +36,11 @@ struct SyntheticIC : fcitx::InputContext {
   ~SyntheticIC() override { destroy(); }
   const char *frontend() const override { return "a5-api-fixture"; }
   std::vector<std::string> delivered;
+  std::vector<fcitx::Key> forwarded_keys;
   void commitStringImpl(const std::string &s) override { delivered.push_back(s); }
   void deleteSurroundingTextImpl(int, unsigned int) override {}
   void forwardKeyImpl(const fcitx::ForwardKeyEvent &k) override {
+    forwarded_keys.push_back(k.rawKey());
     delivered.push_back(std::to_string(k.time()) + (k.isRelease() ? "up" : "down"));
   }
   void updatePreeditImpl() override {}
@@ -241,11 +243,77 @@ void Probe(const std::string &mode) {
   if (peer >= 0) close(peer);
 }
 
+// Tests real API calls plus a synthetic async consumption policy, not an engine.
+void DelayedKeys(const std::string &mode) {
+  fcitx::InputContextManager manager;
+  SyntheticIC old_context(manager), new_context(manager);
+  old_context.focusIn();
+  fcitx::EventLoop loop;
+  struct Pending { fcitx::Key raw; bool release; int stamp; bool consumed; };
+  const auto shifted = fcitx::Key(FcitxKey_A, fcitx::KeyState::Shift);
+  std::vector<Pending> pending = {
+      {fcitx::Key(FcitxKey_Shift_L), false, 1, false},
+      {shifted, false, 2, false}, {shifted, true, 3, false},
+      {fcitx::Key(FcitxKey_Shift_L), true, 4, false},
+      {fcitx::Key(FcitxKey_x), false, 5, true},
+      {fcitx::Key(FcitxKey_x), true, 6, true}};
+  int accepted = 0, engine_results = 0;
+  for (const auto &p : pending) {
+    fcitx::KeyEvent key(&old_context, p.raw, p.release, p.stamp);
+    engine_results += old_context.keyEvent(key); // No Instance/engine: record only.
+    key.filterAndAccept(); // Synthetic policy claims it while async result pending.
+    accepted += key.accepted() && key.filtered();
+  }
+  auto weak = old_context.watch();
+  int epoch = 1, recovery_records = 0, applied = 0;
+  const auto start = fcitx::now(CLOCK_MONOTONIC);
+  auto focus = loop.addTimeEvent(CLOCK_MONOTONIC, start + 50000, 1,
+      [&](fcitx::EventSourceTime *, uint64_t) {
+        if (mode != "stable") {
+          old_context.focusOut(); new_context.focusIn(); ++epoch;
+          if (mode == "focus-back") { new_context.focusOut(); old_context.focusIn(); }
+        }
+        return true;
+      });
+  focus->setOneShot();
+  auto completion = loop.addTimeEvent(CLOCK_MONOTONIC, start + 350000, 1,
+      [&](fcitx::EventSourceTime *, uint64_t) {
+        // Duplicate completion must neither forward keys nor commit twice.
+        for (int duplicate = 0; duplicate < 2; ++duplicate) {
+          auto *ic = weak.get();
+          if (!ic || !ic->hasFocus() || epoch != 1) { recovery_records = pending.size(); continue; }
+          if (applied) continue;
+          ++applied;
+          for (const auto &p : pending) if (!p.consumed) ic->forwardKey(p.raw, p.release, p.stamp);
+          ic->commitString("x");
+        }
+        loop.exit(); return true;
+      });
+  completion->setOneShot();
+  Check(loop.exec(), "key loop");
+  Check(accepted == 6, "synthetic acceptance");
+  Check(new_context.delivered.empty(), "cross-context key delivery");
+  if (mode == "stable") {
+    Check(old_context.delivered == std::vector<std::string>({"1down", "2down", "3up", "4up", "x"}), "keyup/commit order or duplicate");
+    Check(old_context.forwarded_keys == std::vector<fcitx::Key>({pending[0].raw, shifted, shifted, pending[3].raw}), "raw modifier lost");
+    Check(applied == 1, "duplicate commit");
+  } else {
+    Check(old_context.delivered.empty() && recovery_records == 6 && applied == 0, "old epoch delivered or rescue lost");
+  }
+  std::cout << "KEY_METRIC mode=" << mode << " accepted=" << accepted
+            << " engine_results=" << engine_results << " forwarded=" << old_context.forwarded_keys.size()
+            << " commits=" << applied << " recovery_records=" << recovery_records << "\n";
+}
+
+#include "fcitx5_preparation_probe.h"
+
 int main() {
   try {
     ContextContracts();
     const auto fds = OpenFDs();
+    for (const auto *mode : {"stable", "focus-away", "focus-back"}) DelayedKeys(mode);
     for (const auto *mode : {"normal", "delay", "fragment", "disconnect", "silent", "cancel", "focus", "destroy", "blocking-defer-control"}) Probe(mode);
+    for (const auto *mode : {"normal", "public-key", "symlink", "wrong-pid", "wrong-exe", "cancel", "cancel-after-verify"}) PreparationProbe(mode);
     Check(OpenFDs() == fds, "FD leak after loops destroyed");
     std::cout << "FCITX5_API_PROBE PASS\n";
     return 0;

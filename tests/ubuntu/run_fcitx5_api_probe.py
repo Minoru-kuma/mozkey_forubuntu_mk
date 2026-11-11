@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='mozkey-fcitx-api-') as directory:
     print('Fcitx5 version:', subprocess.check_output(
         ['pkg-config', '--modversion', 'Fcitx5Core'], text=True).strip(), flush=True)
     binary = str(pathlib.Path(directory) / 'api-probe')
-    subprocess.run(['g++', '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror',
+    subprocess.run(['g++', '-std=c++20', '-pthread', '-O2', '-Wall', '-Wextra', '-Werror',
                     str(root / 'fcitx5_api_probe.cc'), '-o', binary,
                     *shlex.split(flags)], check=True, timeout=60)
     subprocess.run([binary], check=True, timeout=15)

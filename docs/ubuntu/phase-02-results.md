@@ -473,3 +473,43 @@ IO/Timer/Deferのsocket段階は成立する限定実装候補。しかし同期
 100ms/250msは参考値、APIの低負荷短時間測定は新A5のp99や合格の証明ではない。準備I/Oと物理キー契約を解決するまでは本格統合へ移行しない。systemd・外部常駐サービスへ依存せず、A5合格/次工程はレビュー後とする。
 
 軽量CIではFcitx5 5.1.19以上の開発ファイルが既にある場合のみ同じrunnerを実行し、未導入ならNOT EXECUTEDをnotice/summaryへ出す。apt追加をせず、step成功と実API成功を混同しない。YAML/runner構文・差分を検査する。既存52ケースの製品コードは変更しておらず、既存資産・元worktreeの変更を保持。実IME/Hazkey/システム設定変更、辞書/モデル取得、次工程は0。push後CI結果とremote HEAD一致は完了報告に記す。
+
+## キー順序と接続準備の追加隔離検証
+
+**判定：2課題の限定候補を実API・実syscallで検証したが、実engineの非同期consumeと製品workerの終了所有権は未解決。A5製品実装への移行は保留・レビュー待ち。** 基点`82877dd740cbfc8028baaa158ff4748095e78a67`、remote mainは`b489fca1561bf12ff6b43205378220163d71c21c`。AGENTS.md/PLANS.md/Phase 2計画とa5-async-design.mdを確認し、同じclean worktreeで開始した。
+
+### キーの実APIと合成非同期方針
+
+既存C++ probeに、Shift press→Shift付きA press/release→Shift release→x press/releaseの6件を受け付け、350ms後に直列完了する3モードを追加。元のrawKey・modifier・keyup・timestampを保存し、合成消費方針で先頭4件を転送、xは1回commitする。重複完了を2回呼んでも配送・確定は一度だけ。focus移動と、focusを一度失って戻した場合も、古いepochを適用しない。
+
+| mode | 合成受付数 | 転送数 | commit数 | 救済レコード |
+|---|---:|---:|---:|---:|
+| stable | 6 | 4 | 1 | 0 |
+| focus-away | 6 | 0 | 0 | 6 |
+| focus-back | 6 | 0 | 0 | 6 |
+
+実Fcitx5のKeyEvent/forwardKey/commitStringを実行したが、Instance/engineは起動しておらず`keyEvent`返却は全0。filterAndAcceptと消費の決定はテストが行い、engineの受付hookではない。実物理キーのpass-through後の遡及consumeを検証したものではない。文字データと保留入力をfixtureで保持する確認であり、実frontend/アプリの文字消失防止や入力救済完了ではない。Wayland/X11・modifierの実アプリ解釈・engine再入・実preeditは未検証。
+
+### 準備worker候補の実syscall試験
+
+`fcitx5_preparation_probe.h`を追加。同一プロセスの試験root ownerが1本のworkerとnotification eventfdを所有する。workerが専用mkdtemp内の実profile/keyをopen/openat/fstat/readし、private権限と通常fileを確認。実Unix抽象socketの合成listenerへconnectし、SO_PEERCREDのUID/PIDとreadlink(/proc/PID/exe)を照合し、検証した同一FDをrootへ移す。listenerは試験自身のprocessで、実serverは起動・接続しない。FD移譲は同一process内の所有権移動でSCM_RIGHTSではない。root完了通知は実Fcitx5 IO APIで処理する。
+
+| 条件（350ms停止モデル含む） | 完了通知 | 周期回数 | 最大周期遅れ | 検証/適用 |
+|---|---:|---:|---:|---|
+| 正常private key・peer一致 | 350.757ms | 69 | 0.129ms | 成功/適用 |
+| public key | 350.379ms | 69 | 0.100ms | 拒否/なし |
+| key symlink | 350.349ms | 69 | 0.356ms | 拒否/なし |
+| key内PIDと実peer PID不一致 | 350.457ms | 69 | 0.290ms | 拒否/なし |
+| peer実行パス不一致 | 350.524ms | 69 | 0.113ms | 拒否/なし |
+| 50msで模擬addon閉鎖、検証前取消 | 350.327ms | 69 | 0.068ms | 未検証/なし |
+| 検証済FDを保持してから350ms停止、途中取消 | 350.443ms | 69 | 0.112ms | 成功/適用せず回収 |
+
+完了までroot owner/通知sourceは生存し、完了確認後にloop外でjoin、FDをRAIIで回収。全試験後のFD数不変も成功した。取消時もworkerの終了を入力callback内で待たない点は確認したが、実addon unloadにこのroot ownerが存在することは未証明。実syscall自体を止めたのではなく、その前/後に有限sleepを入れたモデルである。
+
+fixture keyはPID文字列で製品protobuf/版/prefixを扱わず、profile全祖先の不正やfile改変/exec/PID再利用競合も未検証。workerが実I/Oで永久停止した場合、このハーネスは終了を保証できず、外側runnerの15秒timeoutは製品の安全回収の代替ではない。無条件detachやaddon内の長時間joinへ進めない。Fcitx5内で完結する長寿命ownerの実装/終了契約が確定するまで製品移行しない。
+
+### 検証と範囲
+
+`/usr/bin/python3 tests/ubuntu/run_fcitx5_api_probe.py`をsandbox外で実行し、既存Fcitx5 5.1.19・g++ C++20/-pthread/-O2/-Wall/-Wextra/-Werrorで単独build。最終試験は既存9 loopシナリオ＋IC契約、追加3キーシナリオ＋7準備シナリオすべて成功。既存の遅延応答は350.108ms、断片は410.088ms。非ブロッキング8 loopの最大周期遅れ0.477msに対し、Defer内350ms停止の負例は350.070msの遅れを検出した。100ms/250msは参考値であり、p99/製品合格は判定しない。
+
+軽量CIの既存API runnerが新headerを含めて実行する。開発ファイル不足の場合は従来通りNOT EXECUTED。製品ソース・既存52ケース・旧PoCを変更せず、辞書/モデル取得・全件回帰・実IME起動・既存設定変更は0。新規依存導入も行わない。構文/差分と既存資産保護を確認し、対象のみcommit/pushする。CIの実行状態・remote HEAD一致は完了報告へ記録する。
