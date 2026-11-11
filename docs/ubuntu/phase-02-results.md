@@ -1,5 +1,7 @@
 # Phase 2 実行結果
 
+**最新状態（2026-11-11）：helper processの限定PoCは合成条件の8ケースで成功。実検証・製品統合は未実施で、A5未達・工程1停止を維持する。詳細は末尾「helper process限定PoC」を参照。**
+
 ## 最新の判定（2026-11-05）
 
 **Phase 2Aは工程1のIPCゲートで停止、未完了・再設計レビュー待ち。A5未達。**
@@ -342,3 +344,35 @@ helperの検証依頼・FD受信・CREATE/SET_REQUEST/KEY・送受信は同じ�
 レビュー後の追加指示により、既存13パスの工程1差分を作業ブランチへコミット・プッシュすることと、今後の承認済み作業完了時に作業ブランチへ都度反映することが承認された。新しい指示をAGENTS.mdへ記録し、PLANS.md・Phase 2計画の最新承認状態と本節を整合させる。過去節のcommit/push未実施・禁止は、その時点の履歴として保持する。
 
 今回の新規編集はこの4文書のみ。既存ソース10パスは変更せず、保存済みXMLの21+30+1ケース成功とA5停止診断を照合し、差分・空白・文書参照・Git反映範囲を確認する。再ビルド・再テストは行わず、基点mainへのmerge/rebase、PR、helper実装、IME起動、システム変更、工程2〜6/2B/2C/3へは進まない。元worktreeの変更とPhase 1資産・既存ログ/測定値を保持する。実際のcommit SHAとpush後のリモート一致は完了報告に記録する。
+
+## helper process限定PoC（2026-11-11）
+
+**判定：PoCの合成条件では時間目標を満たした。A5本実装・2A全体は引き続き未達で、工程1停止・レビュー待ち。** ユーザーは非ブロッキング起動、SCM_RIGHTS、取消、終了回収、増殖防止に限定したPoCと故障注入、結果記録、作業ブランチへのcommit/pushを承認した。基点は`feat/ubuntu-phase2a` / `bcf263b2a45da51596c4cfbdbf86a9c3004e76a9`、remote mainは`b489fca1561bf12ff6b43205378220163d71c21c`。開始時の作業worktreeはclean。
+
+PoCは`tests/ubuntu/test_linux_helper_poc.py`だけで完結するLinux用の単一スレッド診断であり、Bazel製品target、既存client/transport、Fcitx5、実server、個人profileに接続しない。親はsocketpairを作りfork後すぐに戻り、子がexecする。helperは合成socketpairの片方をSCM_RIGHTSで送信し、親はgeneration、FD数、切詰め、CLOEXECと単一の絶対deadlineを確認する。取消はcontrol channelを閉じ、所有する直接の未回収子をpidfdでSIGKILLする。waitpid(WNOHANG)が終了を確認するまで同じownerは新しいhelperを作成しない。失効済み・過剰FDやqueued FDの破棄、通常転送後の通信、再起動とFD数の保持を試験した。
+
+### 最終測定
+
+`/usr/bin/python3 tests/ubuntu/test_linux_helper_poc.py`を、専用socketpair以外のIPC・ネットワークを使わずsandbox外で実行。8ケース成功、所要2.013秒。時間はmonotonic clock、呼出し開始から親の復帰まで。過去の52ケースは今回再実行していない。
+
+| 合成条件 | 実測 | 判定 |
+|---|---:|---|
+| 正常fork/exec・SCM_RIGHTS転送・synthetic応答、20回の最大 | 43.832ms | 100ms以内 |
+| 子のexec前に350ms停止、親のfork/start復帰 | 0.449ms | 100ms以内 |
+| 上記停止中のdeadline打切り | 100.277ms | 250ms以内 |
+| 検証処理に相当する箇所を350ms停止しdeadline打切り | 100.203ms | 250ms以内 |
+| 上記の親復帰後からwaitpidによる子回収 | 5.199ms | 当該試験では回収成功。親の復帰時間とは別 |
+| 明示取消 | 0.666ms | 250ms以内 |
+| exec失敗 / helper即終了 | 1.015 / 37.946ms | 250ms以内、回収成功 |
+
+両350ms停止の直前にhelperから到達通知を受けたこと、明示取消後の100回の起動拒否、検証待ち失敗後の回収前起動拒否と回収後再起動、異なるgeneration、余分なFD、受信前にqueueへ届いたFDの取消、20回の異常FD転送後の親FD数一致も確認。試験内の2秒回収watchdogは診断終了のためであり、250msの親復帰の代用ではない。
+
+初回の既定`python3`はconda Pythonに`os.pidfd_open`がなく失敗。`/usr/bin/python3`ではsandboxが継承Unix socketの操作をEPERMで拒否し正常転送が失敗したため、同一試験をsandbox外で実行した。これらの失敗は最終成功と区別する。既存buildifier/IPC実装・52ケースの成功記録は変更していない。新規依存、辞書・モデル取得、Bazel再ビルド、IME起動、システム変更は行っていない。
+
+### 限界と次のレビュー点
+
+- 停止は`time.sleep(350ms)`によるモデルで、実filesystem、readlink、execのカーネル内停止や割込み不能D状態ではない。SIGKILL後の実際の回収期限は保証できない。
+- FDはsynthetic socketpairであり、profile/key、SO_PEERCRED、peer PID・実行パス・製品IDの検証や、検証済み実接続FDの移譲を証明しない。SCM_RIGHTS前後のTOCTOU、悪意のあるhelperや各種不正ancillary dataの完全な処理は未検証。
+- `fork`/`exec`は診断用の単一スレッドPython実装。forkからexecまでPythonコードが動くため、マルチスレッドFcitx5内でのasync-signal-safeな起動方式を示すものではない。fork/pidfd_open自体のカーネル待ちもdeadlineで中断できない。exec前停止は親側で待っていないことのモデルである。
+- このownerは回収まで生存する前提。addon unload・Fcitx5終了後も回収責任を持つ主体、長期停止時の資源上限の実運用、InputContext寿命・preedit・重複確定、実server性能・既存client deadline統合、Windows/macOSへの影響は未実装・未検証。子が終了不能なら新規作成を止めるが、回収完了を保証しない。
+- 通常100ms・障害250msは限定診断の実測であり、実Fcitx5 event loopの次dispatchや実IMEの要求全体ではない。helper採用、A5合格、工程2〜6・2B/2C/3への進行を意味しない。
