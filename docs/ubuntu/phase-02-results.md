@@ -691,3 +691,11 @@ frontend境界6ケースは実移植handlerの先頭a/Space、control chord/keyu
 | A7 資産/ホスト保護 | 今回範囲で充足 | 元差分/76資産保持、資源予算内、個人データ/設定/IME変更0 |
 
 2A全体を合格にしない。2B移行不可。残りは、(1) 非同期client/sessionとキー消費・keyup/未配送入力の保護/救済を一貫実装する、(2) 製品runtime/AddonManager終了順序と停止I/Oを検証する、(3) 全private-path/起動経路・live設定/再変換/候補寿命を完了する、(4) load拒否factoryを外せるだけの限定統合/全6系統の証拠を揃えること。実IMEの起動許可がない検証は静的/隔離試験と区別して残す。
+
+### 実装コミット・staging・実CIの確認
+
+実装`5290c564b791423a85b5de20a738062bc17f5abe`を`origin/feat/ubuntu-phase2a`へpushし、remote HEAD一致を確認した。`P2/staging-5290c564b/manifest.json`は同じrevision・dirty=false・49ファイルで全hash一致。3 ELFのhashは上表と一致した。元worktree差分/76資産の保護と作業worktree cleanも再確認した。
+
+同SHAのpushで[Lint 43177493495](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43177493495)、[Linux限定 43177493518](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43177493518)、[Zenz 43177493498](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43177493498)はすべてsuccess。Linux限定は約2分で、helper 8/モデル5ケース成功、既定6ターゲット成功（2ターゲットはtest cache利用）。旧module hashのcache `82877dd740cbfc8028baaa158ff4748095e78a67`を復元でき、入力変更分だけを再ビルドした。
+
+ただしUbuntu 24.04にはFcitx5 5.1.19開発ファイルがなく、実API probeと新設の専用設定ON境界試験はログ上**NOT EXECUTED**だった。これらの成功証拠はローカルUbuntu 26.04の実行結果であり、CI stepのsuccessを実API成功へ読み替えていない。全6系統フルCIは引き続き未実行。後続の文書のみコミットを含めた最終remote HEADとCI状態は完了報告で確認する。
