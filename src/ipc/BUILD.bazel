@@ -63,10 +63,14 @@ mozc_cc_library(
     srcs = ["linux_deadline.cc"],
     hdrs = ["linux_deadline.h"],
     target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//client:__pkg__"],
+    visibility = [
+        "//client:__pkg__",
+        "//unix/fcitx5:__pkg__",
+    ],
     deps = [
         ":ipc",
         ":ipc_cc_proto",
+        "//base:version",
     ],
 )
 
@@ -160,6 +164,7 @@ proto_library(
 
 cc_proto_library(
     name = "ipc_cc_proto",
+    visibility = ["//unix/fcitx5:__pkg__"],
     deps = [":ipc_proto"],
 )
 
@@ -167,6 +172,7 @@ mozc_cc_library(
     name = "ipc_path_manager",
     srcs = ["ipc_path_manager.cc"],
     hdrs = ["ipc_path_manager.h"],
+    visibility = ["//unix/fcitx5:__pkg__"],
     deps = [
         ":ipc_cc_proto",
         ":ipc_hdr",

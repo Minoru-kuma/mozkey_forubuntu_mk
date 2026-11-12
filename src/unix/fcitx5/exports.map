@@ -1,0 +1,1 @@
+{ global: fcitx_addon_factory_instance_mozkey; local: *; };

@@ -159,3 +159,14 @@ mozc_macos_qt_application(
     bundle_name = BRANDING + "Prelauncher",
     deps = [":mozc_tool_main_lib"],
 )
+
+mozc_cc_qt_binary(
+    name = "mozkey_tool",
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//unix/fcitx5:__pkg__"],
+    deps = [":mozc_tool_main_lib"],
+)

@@ -90,6 +90,7 @@ jobs:
           key: linux-limited-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/MODULE.bazel', 'src/MODULE.bazel.lock', 'src/.bazelrc', 'src/bazel/**') }}-${{ github.sha }}
           restore-keys: |
             linux-limited-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/MODULE.bazel', 'src/MODULE.bazel.lock', 'src/.bazelrc', 'src/bazel/**') }}-
+            linux-limited-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Run limited unit tests without dictionary or package generation
         if: steps.changes.outputs.run == 'true'
         working-directory: src
@@ -101,3 +102,21 @@ jobs:
             --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \
             --disk_cache="$HOME/.cache/mozkey-linux-limited/actions" \
             --repo_env=PKG_CONFIG_PATH=
+
+      - name: Run opt-in product boundary tests with installed Fcitx5
+        if: steps.changes.outputs.run == 'true'
+        working-directory: src
+        run: |
+          if pkg-config --exists 'Fcitx5Core >= 5.1.19' 'Fcitx5Utils >= 5.1.19'; then
+            bazelisk test //base:system_util_test //ipc:ipc_path_manager_test \
+              //unix/fcitx5:callback_queue_test //unix/fcitx5:connection_preparation_test \
+              //unix/fcitx5:frontend_boundary_test \
+              --//:linux_mozkey=true --config release_build --jobs=2 \
+              --test_output=errors --test_timeout=60 \
+              --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \
+              --disk_cache="$HOME/.cache/mozkey-linux-limited/actions" \
+              --repo_env=PKG_CONFIG_PATH=
+          else
+            echo '::notice::Opt-in Fcitx5 boundary tests NOT EXECUTED (5.1.19+ development files unavailable)'
+            echo 'Opt-in Fcitx5 product boundary tests: NOT EXECUTED.' >> "$GITHUB_STEP_SUMMARY"
+          fi

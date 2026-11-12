@@ -17,10 +17,15 @@ with tempfile.TemporaryDirectory(prefix='mozkey-fcitx-api-') as directory:
     module = str(pathlib.Path(directory) / 'owner-fixture.so')
     subprocess.run(['g++', '-std=c++20', '-pthread', '-O2', '-Wall', '-Wextra',
                     '-Werror', '-shared', '-fPIC',
-                    str(root / 'worker_owner_fixture.cc'), '-o', module],
+                    str(root / 'worker_owner_fixture.cc'),
+                    str(root.parent.parent / 'src/unix/fcitx5/preparation_worker.cc'),
+                    '-I' + str(root.parent.parent / 'src'), '-o', module],
                    check=True, timeout=60)
     binary = str(pathlib.Path(directory) / 'api-probe')
     subprocess.run(['g++', '-std=c++20', '-pthread', '-O2', '-Wall', '-Wextra', '-Werror',
                     str(root / 'fcitx5_api_probe.cc'), '-o', binary,
                     *shlex.split(flags), '-ldl'], check=True, timeout=60)
-    subprocess.run([binary, module], check=True, timeout=15)
+    subprocess.run([binary, module], check=True, timeout=20)
+    # Ordinary C++ process exit with a completed vs still-blocked worker.
+    for delay in ('350', '3500'):
+        subprocess.run([binary, module, delay], check=True, timeout=3)

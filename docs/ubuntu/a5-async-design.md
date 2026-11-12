@@ -1,4 +1,33 @@
-# A5再設計：イベントループの継続性（レビュー案）
+# A5設計・暫定受入条件：イベントループの継続性
+
+## 現行方針と独立工程（2026-11-12追加指示）
+
+本節を以下の旧基準/停止判定に優先する。前回のjoin負例で不適合だったのは入力loop内のowner破棄であり、全方式の実現不能ではなかった。A5未解決を理由に独立工程を全停止せず、2Aの分離・ビルド・限定検証・stagingを進める。未達部分を合格扱いせず、実IME起動/導入と2B以降は行わない。
+
+| 指標・必須条件 | 現行の扱い |
+|---|---|
+| 打鍵→ひらがな表示 | 300ms未満を初期目安とする。入力受付からfrontendでの表示までを測る。今回の合成応答250msは代替証明ではない |
+| ライブ変換 | 500ms程度を許容し、1秒前後も実測・評価。送信/設定delay/実表示を分ける。遅い応答中も入力loopを継続する |
+| 通常入力・focus移動・IME切替 | 応答/準備/worker終了を同期待機しない。focus/切替に400msの終了予算を使わない |
+| 通常終了 | 最大400msの待機を許容。候補は実プロセス終了だけに限定し、待機予算390ms＋終了処理の余裕10msを用いる。一般的なOSスケジューリングまでの上限保証は未証明 |
+| 旧100ms/250ms | 履歴比較用の参考値。超過のみで全工程を停止しない。既存deadline試験の診断条件は保持する |
+| 入力・資源・独立性 | 異常I/Oの無期限同期待機、文字消失、二重確定、誤配送、他IME干渉は禁止。所有者なしのdetachや無限worker生成で回避しない |
+
+### 今回の実装境界
+
+`PreparationWorker`はプロセス寿命のrootがstd::threadを直接1本所有する。rootは静的破棄を行わず、コード保持はFcitx5 5.1.19のDefaultHint/PreventUnloadHintが前提。要求データとnotification FD、未移譲結果FDはjob/state自身が所有し、addon/IC/loopをcaptureしない。Cancel/owner破棄はjoinせず、停止jobがある間は追加Startを拒否する。完了時にworkerがrootのslotを解放し、取消済み結果は閉じる。正常時も接続FDの移譲は一度だけ。idle時のworkerはrootに所有されたままプロセス終了で回収される。query/終了待ちだけで新規threadは生成しない。
+
+`StartConnectionPreparation`は明示endpointの値コピーだけをworkerへ渡す。既存Linux専用transportの`PrepareLinuxDeadlineSocket`で、実profile/key protobuf、private権限、全祖先のsymlink拒否、製品prefix、peer UID/PID/実行パス、protocol/product版を検証し、**同じnonblocking/CLOEXEC FD**を移譲する。UI側で再接続しない。metadata検証からのTOCTOU/exec/PID再利用を全解決したとは扱わない。100ms deadlineの旧clientは診断資産として残し、通常キーから呼ばない。
+
+`CallbackQueue`は完全なSessionCommandをコピーし、consumed=falseでも有効callbackをtimerへ予約する。0msも次のdispatchへ渡し、1 ICあたり同時timer 1件、即時連鎖16回を上限にする。IC/activation epoch・focus・現在IMEを適用時に照合する。新入力/reset/focus/切替/config/session変更で失効し、キー自体はtimerから再送しない。callback受信側と描画側を製品非同期clientへ接続する作業は残る。
+
+### 残る製品接続条件
+
+移植したフロントエンドの同期Client interfaceを非同期送信/適用へ置換し、KeyEvent受付時のconsumeと後続consumed=false配送を確定させる必要がある。focus/IC破棄後の未配送入力、復旧UIと一度だけの配送、実周辺テキスト/再変換/マクロ/候補世代、live ON/OFF設定の経路は未完成。今回の救済レコード保持だけで文字消失防止を保証しない。
+
+workerの隔離試験はコード保持後の取消と有限350ms/3.5秒停止を確認した。製品のprotobuf処理/依存ライブラリの終了処理との競合、D状態など実kernel I/Oの永久停止、実AddonManager/Instanceの終了順序、thread作成のcold start/高負荷は未検証。400msの数値調整だけでこれらを合格にしない。
+
+したがって専用`.so`のfactoryは常にnullptrを返し、addon定義もEnabled=False。これは明示的な導入禁止のstagingで、機能完成したIMEではない。独立工程を実施した結果と未完成部分を区別し、A5/2A全体は未達のままとする。実測・試験数・成果物は[結果末尾](phase-02-results.md)参照。
 
 **現行の承認（2026-11-12）：ユーザーは2A工程1〜6の実装・ビルド・限定試験・stagingを再承認し、都度レビュー停止を不要とした。以下の旧「製品統合未承認」「レビュー後」は過去の承認状態である。今回の停止は承認不足ではなく、末尾の所有/終了ゲートと入力安全の未解決による安全停止。2A完了・A5合格ではない。**
 

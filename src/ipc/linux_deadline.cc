@@ -12,7 +12,9 @@
 #include <cerrno>
 #include <cstring>
 #include <string>
+#include <utility>
 
+#include "base/version.h"
 #include "ipc/ipc.pb.h"
 
 namespace mozc {
@@ -25,6 +27,7 @@ class Fd {
   Fd(const Fd&) = delete;
   Fd& operator=(const Fd&) = delete;
   int get() const { return fd_; }
+  int Release() { return std::exchange(fd_, -1); }
   void Reset(int fd = -1) { if (fd_ >= 0) close(fd_); fd_ = fd; }
  private:
   int fd_;
@@ -91,8 +94,12 @@ class DeadlineClient final : public IPCClientInterface {
     for (int trial = 0; trial < 2 && !deadline_.Expired(); ++trial) {
       fd_.Reset();
       if (!ReadKey(endpoint, deadline_, &info_)) break;
+#if defined(MOZKEY_LINUX_BUILD)
+      std::string address = "/tmp/.mozkey." + info_.key() + "." + endpoint.channel;
+#else
       std::string address = "/tmp/.mozc." + info_.key() + "." + endpoint.channel;
-      address[0] = '\0';  // Existing protocol; product ID migration is outside A5.
+#endif
+      address[0] = '\0';
       sockaddr_un sock{};
       sock.sun_family = AF_UNIX;
       if (address.size() >= sizeof(sock.sun_path)) break;
@@ -122,6 +129,13 @@ class DeadlineClient final : public IPCClientInterface {
     fd_.Reset();
   }
   bool Connected() const override { return connected_; }
+  int ReleaseValidatedFd() {
+    if (!connected_ || deadline_.Expired() ||
+        info_.protocol_version() != IPC_PROTOCOL_VERSION ||
+        info_.product_version() != Version::GetMozcVersion()) return -1;
+    connected_ = false;
+    return fd_.Release();
+  }
   uint32_t GetServerProtocolVersion() const override { return info_.protocol_version(); }
   absl::string_view GetServerProductVersion() const override { return info_.product_version(); }
   uint32_t GetServerProcessId() const override { return info_.process_id(); }
@@ -181,6 +195,11 @@ class DeadlineClient final : public IPCClientInterface {
 std::unique_ptr<IPCClientInterface> NewLinuxDeadlineIPCClient(
     const LinuxDeadlineEndpoint& endpoint, const LinuxDeadline& deadline) {
   return std::make_unique<DeadlineClient>(endpoint, deadline);
+}
+int PrepareLinuxDeadlineSocket(const LinuxDeadlineEndpoint& endpoint,
+                               const LinuxDeadline& deadline) {
+  DeadlineClient peer(endpoint, deadline);
+  return peer.ReleaseValidatedFd();
 }
 }  // namespace mozc
 #endif

@@ -1,6 +1,6 @@
 # Ubuntu開発のCI運用
 
-2026-11-11。AGENTS.mdとPLANS.mdに従い、通常pushは軽量、Phase完了・main統合前はフルCIとする。今回のCI運用変更はA5未達・Phase 2A工程1停止を解除しない。
+2026-11-12更新。AGENTS.mdとPLANS.mdに従い、通常pushは軽量、Phase完了・main統合前はフルCIとする。2Aの再開/実装範囲は最新ユーザー指示とPLANS.mdに従い、CI成功だけでA5を合格扱いしない。
 
 ## 実行条件
 
@@ -20,7 +20,9 @@
 
 Fcitx5 5.1.19以上の開発ファイルが既にあるrunnerでは`run_fcitx5_api_probe.py`で独立C++ API試験を実行する。ない場合は未実行をnotice/summaryへ明記し、apt等で導入しない。stepの成功を実API検証成功へ読み替えず、ログのPASSを確認する。
 
-非同期IPCのモデルPoC `tests/ubuntu/test_async_ipc_poc.py`も毎回実行する。旧helper PoCの数値アサートはその診断資産として維持するが、新A5の受入判定は[設計案](a5-async-design.md)のレビュー後とする。
+同じ開発ファイルがある場合、src変更時には専用設定ONのsystem_util/ipc_path_managerとcallback_queue/connection_preparation/frontend_boundaryの限定試験も実行する。辞書・package・実IMEは不要。Ubuntu 24.04で未導入ならNOT EXECUTEDを明記する。新規Fcitx製品targetはmanual/opt-inとし、既定の全OSビルドへSDK依存を強制しない。通常の6ターゲットは設定OFFを保つ。cacheの入力hash変更時は同一OS/archの旧cacheも復元候補にし、Bazel側の入力/action digestで再利用を判定する。依存の版・チェックサム検証は変更しない。
+
+非同期IPCのモデルPoC `tests/ubuntu/test_async_ipc_poc.py`も毎回実行する。旧helper PoCの数値アサートはその診断資産として維持するが、A5の判定は[現行の設計・受入条件](a5-async-design.md)に従い、未達/未検証を合格扱いしない。
 
 Lintは既存buildifier処理。ZenzはPython単体試験とruntime_lock.py checkだけであり、直前の実測run 42563537869は開始から完了まで約12秒。モデル・辞書・scorerの取得起動はしないため軽量側に維持する。
 

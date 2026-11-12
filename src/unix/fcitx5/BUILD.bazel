@@ -1,0 +1,289 @@
+load(
+    "//:build_defs.bzl",
+    "mozc_cc_binary",
+    "mozc_cc_library",
+    "mozc_cc_test",
+)
+
+package(default_visibility = ["//:__subpackages__"])
+
+mozc_cc_library(
+    name = "mozc_client_interface",
+    hdrs = [
+        "mozc_client_interface.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_client_pool",
+    srcs = [
+        "mozc_client_pool.cc",
+    ],
+    hdrs = [
+        "mozc_client_pool.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":mozc_client_interface",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_ipc_client",
+    srcs = [
+        "mozc_ipc_client.cc",
+    ],
+    hdrs = [
+        "mozc_ipc_client.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":mozc_client_interface",
+        "//client",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+    ],
+)
+
+mozc_cc_library(
+    name = "i18nwrapper",
+    hdrs = [
+        "i18nwrapper.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "mozc_engine",
+    srcs = [
+        "mozc_engine.cc",
+        "mozc_response_parser.cc",
+        "mozc_state.cc",
+    ],
+    hdrs = [
+        "mozc_engine.h",
+        "mozc_response_parser.h",
+        "mozc_state.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":callback_queue",
+        ":fcitx_key_util",
+        ":i18nwrapper",
+        ":mozc_client_pool",
+        ":mozc_ipc_client",
+        ":surrounding_text_util",
+        "//base:port",
+        "//base:process",
+        "//base:run_level",
+        "//base:util",
+        "//base:vlog",
+        "//protocol:candidate_window_cc_proto",
+        "//protocol:commands_cc_proto",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "fcitx_key_util",
+    srcs = [
+        "fcitx_key_event_handler.cc",
+        "fcitx_key_translator.cc",
+    ],
+    hdrs = [
+        "fcitx_key_event_handler.h",
+        "fcitx_key_translator.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//base:port",
+        "//base:vlog",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "@com_google_absl//absl/log:check",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "surrounding_text_util",
+    srcs = [
+        "surrounding_text_util.cc",
+    ],
+    hdrs = [
+        "surrounding_text_util.h",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//base:port",
+        "//base:util",
+        "//base:vlog",
+        "@com_google_absl//absl/log:check",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_binary(
+    name = "fcitx5-mozkey.so",
+    srcs = [
+        "mozc_engine_factory.cc",
+    ],
+    additional_linker_inputs = ["exports.map"],
+    linkopts = ["-Wl,--version-script=$(location exports.map)"],
+    linkshared = 1,
+    linkstatic = 1,
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":mozc_engine",
+    ],
+)
+
+mozc_cc_library(
+    name = "callback_queue",
+    srcs = ["callback_queue.cc"],
+    hdrs = ["callback_queue.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//protocol:commands_cc_proto",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_library(
+    name = "preparation_worker",
+    srcs = ["preparation_worker.cc"],
+    hdrs = ["preparation_worker.h"],
+    linkopts = ["-pthread"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+mozc_cc_test(
+    name = "callback_queue_test",
+    srcs = ["callback_queue_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":callback_queue",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
+    name = "connection_preparation",
+    srcs = ["connection_preparation.cc"],
+    hdrs = ["connection_preparation.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":preparation_worker",
+        "//ipc:linux_deadline",
+    ],
+)
+
+mozc_cc_test(
+    name = "connection_preparation_test",
+    srcs = ["connection_preparation_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":connection_preparation",
+        "//base:file_util",
+        "//base:system_util",
+        "//ipc:ipc_cc_proto",
+        "//ipc:ipc_path_manager",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+        "@fcitx5",
+    ],
+)
+
+filegroup(
+    name = "stage_inputs",
+    srcs = [
+        ":connection_preparation",
+        ":fcitx5-mozkey.so",
+        ":mozc_engine",
+        "//gui/tool:mozkey_tool",
+        "//server:mozkey_server",
+    ],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+mozc_cc_test(
+    name = "frontend_boundary_test",
+    srcs = ["frontend_boundary_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":fcitx_key_util",
+        ":surrounding_text_util",
+        "//testing:gunit_main",
+    ],
+)

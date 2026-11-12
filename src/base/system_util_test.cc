@@ -32,6 +32,7 @@
 #include <string>
 
 #include "base/environ_mock.h"
+#include "base/const.h"
 #include "base/file_util.h"
 #include "base/file_util_mock.h"
 #include "testing/gmock.h"
@@ -40,6 +41,14 @@
 namespace mozc {
 
 class SystemUtilTest : public testing::Test {};
+
+#ifdef MOZKEY_LINUX_BUILD
+TEST_F(SystemUtilTest, DedicatedProductPaths) {
+  EXPECT_STREQ(kProductNameInEnglish, "Mozkey");
+  EXPECT_EQ(SystemUtil::GetServerPath(), "/usr/lib/mozkey/mozkey_server");
+  EXPECT_EQ(SystemUtil::GetToolPath(), "/usr/lib/mozkey/mozkey_tool");
+}
+#endif
 
 TEST_F(SystemUtilTest, GetUserProfileDirectory) {
 #if defined(OS_CHROMEOS)
@@ -55,6 +64,20 @@ TEST_F(SystemUtilTest, GetUserProfileDirectory) {
 #elif defined(__APPLE__)
   // TODO(komatsu): write a test.
 
+#elif defined(MOZKEY_LINUX_BUILD)
+  EnvironMock environ_mock;
+  FileUtilMock file_util_mock;
+  SystemUtil::SetUserProfileDirectory("");
+  EXPECT_EQ("/home/mozcuser/.config/mozkey", SystemUtil::GetUserProfileDirectory());
+  EXPECT_OK(FileUtil::CreateDirectory("/home/mozcuser/.mozc"));
+  environ_mock.SetEnv("XDG_CONFIG_HOME", "/tmp/config");
+  SystemUtil::SetUserProfileDirectory("");
+  EXPECT_EQ("/tmp/config/mozkey", SystemUtil::GetUserProfileDirectory());
+  // A legacy profile and an invalid relative XDG path never select .mozc.
+  environ_mock.SetEnv("XDG_CONFIG_HOME", "relative");
+  SystemUtil::SetUserProfileDirectory("");
+  EXPECT_EQ("/home/mozcuser/.config/mozkey", SystemUtil::GetUserProfileDirectory());
+  SystemUtil::SetUserProfileDirectory("");
 #elif defined(__linux__)
   EnvironMock environ_mock;
   FileUtilMock file_util_mock;

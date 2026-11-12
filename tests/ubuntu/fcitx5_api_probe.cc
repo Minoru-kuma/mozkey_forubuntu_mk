@@ -89,6 +89,11 @@ void Probe(const std::string &mode) {
   Check(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, sockets) == 0, "socketpair");
   int client = sockets[0], peer = sockets[1];
   const auto start = fcitx::now(CLOCK_MONOTONIC);
+  const bool extended = mode == "reply-250" || mode == "live-500" || mode == "live-1000";
+  const uint64_t response_delay = mode == "normal" ? 10000 :
+      mode == "reply-250" ? 250000 : mode == "live-500" ? 500000 :
+      mode == "live-1000" ? 1000000 : 350000;
+  const uint64_t cutoff = extended ? response_delay + 100000 : 450000;
   int ticks = 0, ticks_at_reply = 0, commits = 0, defers = 0, cancelled_callback = 0;
   int epoch = 1;
   bool closed = false, applied = false, fixture_ok = true;
@@ -184,7 +189,7 @@ void Probe(const std::string &mode) {
     });
   }
   if (mode != "silent") {
-    timer(start + (mode == "normal" ? 10000 : 350000),
+    timer(start + response_delay,
         [&](fcitx::EventSourceTime *, uint64_t) {
           if (mode == "disconnect") {
             close(std::exchange(peer, -1));
@@ -204,7 +209,7 @@ void Probe(const std::string &mode) {
       return true;
     });
   }
-  timer(start + 450000, [&](fcitx::EventSourceTime *, uint64_t) {
+  timer(start + cutoff, [&](fcitx::EventSourceTime *, uint64_t) {
     if (!closed) close_request();
     return true;
   });
@@ -213,12 +218,12 @@ void Probe(const std::string &mode) {
     heartbeat->setEnabled(false);
     return true;
   });
-  timer(start + 550000, [&](fcitx::EventSourceTime *, uint64_t) { loop.exit(); return true; });
+  timer(start + cutoff + 100000, [&](fcitx::EventSourceTime *, uint64_t) { loop.exit(); return true; });
   try {
     Check(loop.exec(), "event loop exit");
     Check(fixture_ok, "fixture send");
     Check(ticks > (mode == "blocking-defer-control" ? 20 : 40) && cancelled_callback == 0 && closed, "continuity or cancellation");
-    const bool success = mode == "normal" || mode == "delay" || mode == "fragment" || mode == "blocking-defer-control";
+    const bool success = extended || mode == "normal" || mode == "delay" || mode == "fragment" || mode == "blocking-defer-control";
     if (mode == "blocking-defer-control") Check(lag_max >= 300, "negative control not detected");
     if (context) Check(context->delivered.size() == static_cast<size_t>(commits), "actual IC commit count");
     else Check(!watch.isValid(), "destroyed context watch");
@@ -308,15 +313,18 @@ void DelayedKeys(const std::string &mode) {
 #include "fcitx5_preparation_probe.h"
 
 #include "fcitx5_owner_gate.h"
+#include "fcitx5_root_owner_probe.h"
 
 int main(int argc, char **argv) {
   try {
-    Check(argc == 2, "expected owner fixture library path");
+    Check(argc == 2 || argc == 3, "expected owner fixture library path");
+    if (argc == 3) return ProcessExitProbe(argv[1], std::stoi(argv[2]));
     const auto fds = OpenFDs();
     OwnerLifetimeGate(argv[1]);
+    RootOwnerProbe(argv[1]);
     ContextContracts();
     for (const auto *mode : {"stable", "focus-away", "focus-back"}) DelayedKeys(mode);
-    for (const auto *mode : {"normal", "delay", "fragment", "disconnect", "silent", "cancel", "focus", "destroy", "blocking-defer-control"}) Probe(mode);
+    for (const auto *mode : {"normal", "reply-250", "live-500", "live-1000", "delay", "fragment", "disconnect", "silent", "cancel", "focus", "destroy", "blocking-defer-control"}) Probe(mode);
     for (const auto *mode : {"normal", "public-key", "symlink", "wrong-pid", "wrong-exe", "cancel", "cancel-after-verify"}) PreparationProbe(mode);
     Check(OpenFDs() == fds, "FD leak after loops destroyed");
     std::cout << "FCITX5_API_PROBE PASS\n";

@@ -50,6 +50,13 @@ struct LinuxDeadlineEndpoint {
 std::unique_ptr<IPCClientInterface> NewLinuxDeadlineIPCClient(
     const LinuxDeadlineEndpoint& endpoint, const LinuxDeadline& deadline);
 
+// Worker-only preparation boundary: filesystem/key/UID/PID/executable and
+// protocol/product version checks finish before releasing this same socket.
+// Caller owns the nonblocking CLOEXEC FD. No request has been sent. Returns -1
+// on failure; no launcher/recovery/reconnect is performed after this handoff.
+int PrepareLinuxDeadlineSocket(const LinuxDeadlineEndpoint& endpoint,
+                               const LinuxDeadline& deadline);
+
 // One shared instance per addon. BeginClose() MUST precede destruction of a
 // batch of contexts; it seals the group and gives the entire batch 100ms.
 // Calls are serialized on the owner event-loop thread, never concurrently.

@@ -372,3 +372,13 @@ http_archive(
     sha256 = "3adc97d8e19e1168a6cdcb2fce759d0e9e613a9a3b630cc180aecfd56ae81eaf",
     url = "https://github.com/hiroyuki-komatsu/japanpost_zipcode/raw/621d059fbcbfae17bfca15b439692bae934268c3/ken_all.zip",
 )
+
+# Resolved only for the opt-in Linux Fcitx5 targets. Clipboard fallback is off.
+pkg_config_repository(
+    name = "fcitx5",
+    packages = [
+        "Fcitx5Config",
+        "Fcitx5Core",
+        "Fcitx5Utils",
+    ],
+)

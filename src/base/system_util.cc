@@ -83,13 +83,17 @@
 namespace mozc {
 namespace {
 
-#if defined(MOZC_SERVER_DIR)
+#if defined(MOZKEY_LINUX_BUILD)
+constexpr absl::string_view kMozcServerDir = MOZKEY_SERVER_DIR;
+#elif defined(MOZC_SERVER_DIR)
 constexpr absl::string_view kMozcServerDir = MOZC_SERVER_DIR;
 #else  // MOZC_SERVER_DIR
 constexpr absl::string_view kMozcServerDir = "/usr/lib/mozc";
 #endif  // MOZC_SERVER_DIR
 
-#if defined(MOZC_DOCUMENT_DIR)
+#if defined(MOZKEY_LINUX_BUILD)
+constexpr absl::string_view kMozcDocumentDir = MOZKEY_SERVER_DIR "/documents";
+#elif defined(MOZC_DOCUMENT_DIR)
 constexpr absl::string_view kMozcDocumentDir = MOZC_DOCUMENT_DIR;
 #else  // MOZC_DOCUMENT_DIR
 constexpr absl::string_view kMozcDocumentDir = "/usr/lib/mozc/documents";
@@ -332,6 +336,23 @@ std::string UserProfileDirectoryImpl::GetUserProfileDirectory() const {
     return FileUtil::JoinPath(dir, "Mozc");
 #endif  //  GOOGLE_JAPANESE_INPUT_BUILD
 
+#elif defined(MOZKEY_LINUX_BUILD)
+    // Never inspect or migrate .mozc/Hazkey; XDG must be an absolute path.
+    const std::string xdg = Environ::GetEnv("XDG_CONFIG_HOME");
+    if (!xdg.empty() && xdg.front() == '/') {
+      return FileUtil::JoinPath(xdg, "mozkey");
+    }
+    const std::string home = Environ::GetEnv("HOME");
+    if (!home.empty() && home.front() == '/') {
+      return FileUtil::JoinPath(home, ".config/mozkey");
+    }
+    char buf[16384];
+    struct passwd pw, *result = nullptr;
+    if (getpwuid_r(geteuid(), &pw, buf, sizeof(buf), &result) != 0 ||
+        result == nullptr || pw.pw_dir == nullptr || pw.pw_dir[0] != '/') {
+      return "";  // Fail closed; never select a different product's profile.
+    }
+    return FileUtil::JoinPath(pw.pw_dir, ".config/mozkey");
 #elif defined(__linux__)
     // 1. If "$HOME/.mozc" already exists,
     //    use "$HOME/.mozc" for backward compatibility.

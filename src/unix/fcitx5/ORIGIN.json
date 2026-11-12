@@ -1,0 +1,190 @@
+{
+  "repository": "https://github.com/fcitx/mozc",
+  "revision": "384a85cf2f5db982e64c5c33cade66b2a5e5176c",
+  "excluded": [
+    "mozc_direct_client.cc",
+    "mozc_direct_client.h",
+    "po/",
+    "AppStream metadata",
+    "Messages.sh"
+  ],
+  "files": [
+    {
+      "upstream_path": "src/unix/fcitx5/BUILD.bazel",
+      "upstream_blob_sha1": "2c499d373be8cdbc8d781f95ad8e93363ce7d429",
+      "upstream_bytes": 3604,
+      "local_path": "BUILD.bazel",
+      "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
+      "changes": "Opt-in Linux/manual targets; exclude direct client; add bounded callback/preparation tests, export control and staging inputs"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/fcitx_key_event_handler.cc",
+      "upstream_blob_sha1": "0c6a235cd15cb6b35e19cfcc785f637eaf86c767",
+      "upstream_bytes": 9639,
+      "local_path": "fcitx_key_event_handler.cc",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/fcitx_key_event_handler.h",
+      "upstream_blob_sha1": "c62f9541c84ca8272e88fc1d8f1e33ff2903974a",
+      "upstream_bytes": 3392,
+      "local_path": "fcitx_key_event_handler.h",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/fcitx_key_translator.cc",
+      "upstream_blob_sha1": "86e63d49ad8d435afb59b7c327327b547b656aaf",
+      "upstream_bytes": 17840,
+      "local_path": "fcitx_key_translator.cc",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/fcitx_key_translator.h",
+      "upstream_blob_sha1": "380abb94021911f25abaf9c4cb56b2c69275fbf9",
+      "upstream_bytes": 3215,
+      "local_path": "fcitx_key_translator.h",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/i18nwrapper.h",
+      "upstream_blob_sha1": "9680f1856a30fc94621160d297f5c8a95fc75182",
+      "upstream_bytes": 937,
+      "local_path": "i18nwrapper.h",
+      "license_notice": "LGPL-2.0-or-later",
+      "changes": "Dedicated fcitx5-mozkey gettext domain"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc-addon.conf",
+      "upstream_blob_sha1": "88fbc11b320dfc149cc6382031eaaccb64d9f6ff",
+      "upstream_bytes": 152,
+      "local_path": "mozkey-addon.conf",
+      "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
+      "changes": "Rename addon/library to Mozkey and disable loading by default"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc.conf",
+      "upstream_blob_sha1": "40725d7d8ef0321c82c7393d5802da96cbf48b61",
+      "upstream_bytes": 91,
+      "local_path": "mozkey.conf",
+      "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
+      "changes": "Rename inputmethod/addon/icon IDs to Mozkey"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_client_interface.h",
+      "upstream_blob_sha1": "3a885bebde0c1b2f353f4b7c8d356b6ae8eacd4b",
+      "upstream_bytes": 1603,
+      "local_path": "mozc_client_interface.h",
+      "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_client_pool.cc",
+      "upstream_blob_sha1": "81af3434db9fd0867c3ef1a97df52215b373bd83",
+      "upstream_bytes": 4103,
+      "local_path": "mozc_client_pool.cc",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_client_pool.h",
+      "upstream_blob_sha1": "92996981f0a21b0b35e03895d1ec71d356210ef8",
+      "upstream_bytes": 2597,
+      "local_path": "mozc_client_pool.h",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_engine.cc",
+      "upstream_blob_sha1": "8bf1f44a155239397968f3e14d804ccacdfe97c2",
+      "upstream_bytes": 11275,
+      "local_path": "mozc_engine.cc",
+      "license_notice": "LGPL-2.0-or-later",
+      "changes": "Mozkey registrations/settings/actions; per-IC clients; remove process-wide InitMozc; invalidate timers on config changes; no clipboard loader"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_engine.h",
+      "upstream_blob_sha1": "c931ba4cf283f7a0c18ed666083e376fc2596967",
+      "upstream_bytes": 6832,
+      "local_path": "mozc_engine.h",
+      "license_notice": "LGPL-2.0-or-later",
+      "changes": "Mozkey tool path and configuration labels; per-IC default; no clipboard dependency"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_engine_factory.cc",
+      "upstream_blob_sha1": "7b51b3dc0a26782d192a93b961763779b1d236a7",
+      "upstream_bytes": 2469,
+      "local_path": "mozc_engine_factory.cc",
+      "license_notice": "LGPL-2.0-or-later",
+      "changes": "Preserve LGPL notice; Mozkey V2 factory; always refuse loading until A5 product integration passes"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_ipc_client.cc",
+      "upstream_blob_sha1": "d11f3b00253c2633b8f6954ab4dff0127ceb4411",
+      "upstream_bytes": 1882,
+      "local_path": "mozc_ipc_client.cc",
+      "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_ipc_client.h",
+      "upstream_blob_sha1": "88ce29ff9002bcae8ef4cd0687069cfb63f71573",
+      "upstream_bytes": 1418,
+      "local_path": "mozc_ipc_client.h",
+      "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
+      "changes": "Unmodified upstream file"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_response_parser.cc",
+      "upstream_blob_sha1": "566d1b054a40f9ded7874c1cac8c56a3dd1c2144",
+      "upstream_bytes": 17654,
+      "local_path": "mozc_response_parser.cc",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Schedule callbacks also for consumed=false; use shared response path; fix candidate-index bounds check"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_response_parser.h",
+      "upstream_blob_sha1": "42f0c666b43bd89549418016d8fa4e6b5b16c0fc",
+      "upstream_bytes": 3267,
+      "local_path": "mozc_response_parser.h",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Mozkey user-visible identifiers; original C++ names and notices retained"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_state.cc",
+      "upstream_blob_sha1": "9d937b95b5380ed35a946527f3c1c59be48b45a3",
+      "upstream_bytes": 15151,
+      "local_path": "mozc_state.cc",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Per-IC full-copy callback scheduling, epoch invalidation; focus/switch without RPC wait; preserve unconsumed partial UI state"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/mozc_state.h",
+      "upstream_blob_sha1": "cb112de8b6f9d7d1afc2f6f2f157ffe009f7ddf6",
+      "upstream_bytes": 6280,
+      "local_path": "mozc_state.h",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Own per-IC callback queue and epoch"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/surrounding_text_util.cc",
+      "upstream_blob_sha1": "b24c892eff3477a36ef50b2bb0f90c9660280ae3",
+      "upstream_bytes": 7685,
+      "local_path": "surrounding_text_util.cc",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Disable clipboard fallback; suppress password/sensitive surrounding text"
+    },
+    {
+      "upstream_path": "src/unix/fcitx5/surrounding_text_util.h",
+      "upstream_blob_sha1": "03cf487b60c46865133dcb72790f301c6c377702",
+      "upstream_bytes": 3428,
+      "local_path": "surrounding_text_util.h",
+      "license_notice": "BSD-3-Clause",
+      "changes": "Unmodified upstream file"
+    }
+  ],
+  "repository_license": "UPSTREAM-LICENSE (BSD-3-Clause); explicit per-file LGPL notices take precedence"
+}

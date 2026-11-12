@@ -94,6 +94,20 @@ TEST_F(IPCPathManagerTest, IPCPathManagerTest) {
   }
 }
 
+
+#ifdef MOZKEY_LINUX_BUILD
+TEST_F(IPCPathManagerTest, DedicatedAbstractNamespace) {
+  auto* manager = IPCPathManager::GetIPCPathManager("identity_test");
+  ASSERT_TRUE(manager->CreateNewPathName());
+  std::string path;
+  ASSERT_TRUE(manager->GetPathName(&path));
+  ASSERT_GT(path.size(), 13);
+  EXPECT_EQ(path[0], '\0');
+  EXPECT_EQ(path.substr(1, 12), "tmp/.mozkey.");
+  EXPECT_EQ(path.find(".mozc."), std::string::npos);
+}
+#endif
+
 // Test the thread-safeness of GetPathName() and
 // GetIPCPathManager
 TEST_F(IPCPathManagerTest, IPCPathManagerBatchTest) {

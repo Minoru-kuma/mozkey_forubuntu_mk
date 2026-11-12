@@ -41,7 +41,7 @@ load(
     "mozc_select_enable_supplemental_model",
     "mozc_select_enable_usage_rewriter",
 )
-load("//:config.bzl", "BAZEL_TOOLS_PREFIX", "BRANDING")
+load("//:config.bzl", "BAZEL_TOOLS_PREFIX", "BRANDING", "LINUX_MOZKEY_SERVER_DIR")
 load(
     "//:version.bzl",
     "DEFAULT_BUILD_LABEL_MACOS",
@@ -239,6 +239,12 @@ cc_library(
     ) + mozc_select_enable_usage_rewriter(
         off = ["NO_USAGE_REWRITER"],
     ) + select({
+        ":linux_mozkey_enabled": [
+            "MOZKEY_LINUX_BUILD",
+            'MOZKEY_SERVER_DIR=\\"' + LINUX_MOZKEY_SERVER_DIR + '\\"',
+        ],
+        "//conditions:default": [],
+    }) + select({
         ":dev_channel": ["CHANNEL_DEV=1"],
         "//conditions:default": [],
     }),
@@ -388,4 +394,16 @@ selects.config_setting_group(
         ":local_win_universal_installer",
         "@platforms//cpu:x86_64",
     ],
+)
+
+# Opt-in: the default package and every non-Linux platform keep legacy identity.
+bool_flag(
+    name = "linux_mozkey",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "linux_mozkey_enabled",
+    constraint_values = ["@platforms//os:linux"],
+    flag_values = {":linux_mozkey": "True"},
 )

@@ -31,7 +31,13 @@
 #define MOZC_BASE_CONST_H_
 
 namespace mozc {
-#ifdef GOOGLE_JAPANESE_INPUT_BUILD
+#if defined(MOZKEY_LINUX_BUILD)
+#if !defined(__linux__) || defined(__ANDROID__)
+#error "MOZKEY_LINUX_BUILD is Linux desktop only"
+#endif
+inline constexpr char kProductNameInEnglish[] = "Mozkey";
+#define kProductPrefix "Mozkey"
+#elif defined(GOOGLE_JAPANESE_INPUT_BUILD)
 inline constexpr char kProductNameInEnglish[] = "Google Japanese Input";
 #define kProductPrefix "GoogleJapaneseInput"
 #else  // GOOGLE_JAPANESE_INPUT_BUILD
@@ -137,6 +143,11 @@ inline constexpr char kEventPathPrefix[] = "GoogleJapaneseInput.event.";
 #else   // GOOGLE_JAPANESE_INPUT_BUILD
 inline constexpr char kEventPathPrefix[] = "Mozc.event.";
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
+#elif defined(MOZKEY_LINUX_BUILD)
+inline constexpr char kMozcServerName[] = "mozkey_server";
+inline constexpr char kMozcRenderer[] = "mozkey_renderer";
+inline constexpr char kEventPathPrefix[] = "mozkey.event.";
+inline constexpr char kMozcTool[] = "mozkey_tool";
 #else   // __linux__ including __ANDROID__
 inline constexpr char kMozcServerName[] = "mozc_server";
 inline constexpr char kMozcRenderer[] = "mozc_renderer";

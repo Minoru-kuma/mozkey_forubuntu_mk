@@ -124,3 +124,14 @@ mozc_macos_application(
     ],
     deps = [":mozc_server_lib"],
 )
+
+mozc_cc_binary(
+    name = "mozkey_server",
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//unix/fcitx5:__pkg__"],
+    deps = [":mozc_server_lib"],
+)

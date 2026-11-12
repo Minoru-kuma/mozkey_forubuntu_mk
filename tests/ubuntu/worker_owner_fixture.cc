@@ -20,3 +20,23 @@ struct Owner {
 };
 extern "C" void *a5_owner_create() { return new Owner; }
 extern "C" void a5_owner_close(void *owner) { delete static_cast<Owner *>(owner); }
+
+// Positive candidate: process-owned, one worker across wrapper unload/reload.
+#include <sys/eventfd.h>
+#include "unix/fcitx5/preparation_worker.h"
+using PreparationWorker = mozc::fcitx5::PreparationWorker;
+static std::atomic<int> running{0};
+extern "C" void *a5_worker_start(int delay_ms) {
+  return PreparationWorker::Start([delay_ms](const std::atomic<bool>&) {
+    running.fetch_add(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    running.fetch_sub(1);
+    return eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  }).release();
+}
+extern "C" void a5_worker_close(void *p) { delete static_cast<PreparationWorker*>(p); }
+extern "C" bool a5_worker_busy() { return PreparationWorker::Busy(); }
+extern "C" int a5_worker_running() { return running.load(); }
+extern "C" bool a5_worker_wait_exit(int ms) {
+  return PreparationWorker::WaitForProcessExit(std::chrono::milliseconds(ms));
+}

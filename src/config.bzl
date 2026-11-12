@@ -40,6 +40,9 @@ BAZEL_TOOLS_PREFIX = "@bazel_tools"
 LINUX_MOZC_BROWSER_COMMAND = "/usr/bin/xdg-open"
 LINUX_MOZC_ICONS_DIR = "/usr/share/icons/mozc"
 LINUX_MOZC_SERVER_DIR = "/usr/lib/mozc"
+
+# Dedicated Fcitx5 product. Never include DESTDIR/staging in this runtime path.
+LINUX_MOZKEY_SERVER_DIR = "/usr/lib/mozkey"
 LINUX_MOZC_DOCUMENT_DIR = LINUX_MOZC_SERVER_DIR + "/documents"
 IBUS_COMPONENT_DIR = "/usr/share/ibus/component"
 IBUS_MOZC_INSTALL_DIR = "/usr/share/ibus-mozc"
