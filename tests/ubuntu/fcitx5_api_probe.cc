@@ -307,10 +307,14 @@ void DelayedKeys(const std::string &mode) {
 
 #include "fcitx5_preparation_probe.h"
 
-int main() {
+#include "fcitx5_owner_gate.h"
+
+int main(int argc, char **argv) {
   try {
-    ContextContracts();
+    Check(argc == 2, "expected owner fixture library path");
     const auto fds = OpenFDs();
+    OwnerLifetimeGate(argv[1]);
+    ContextContracts();
     for (const auto *mode : {"stable", "focus-away", "focus-back"}) DelayedKeys(mode);
     for (const auto *mode : {"normal", "delay", "fragment", "disconnect", "silent", "cancel", "focus", "destroy", "blocking-defer-control"}) Probe(mode);
     for (const auto *mode : {"normal", "public-key", "symlink", "wrong-pid", "wrong-exe", "cancel", "cancel-after-verify"}) PreparationProbe(mode);

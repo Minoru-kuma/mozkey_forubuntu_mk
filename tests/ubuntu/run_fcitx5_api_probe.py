@@ -14,8 +14,13 @@ with tempfile.TemporaryDirectory(prefix='mozkey-fcitx-api-') as directory:
         ['pkg-config', '--cflags', '--libs', 'Fcitx5Core', 'Fcitx5Utils'], text=True)
     print('Fcitx5 version:', subprocess.check_output(
         ['pkg-config', '--modversion', 'Fcitx5Core'], text=True).strip(), flush=True)
+    module = str(pathlib.Path(directory) / 'owner-fixture.so')
+    subprocess.run(['g++', '-std=c++20', '-pthread', '-O2', '-Wall', '-Wextra',
+                    '-Werror', '-shared', '-fPIC',
+                    str(root / 'worker_owner_fixture.cc'), '-o', module],
+                   check=True, timeout=60)
     binary = str(pathlib.Path(directory) / 'api-probe')
     subprocess.run(['g++', '-std=c++20', '-pthread', '-O2', '-Wall', '-Wextra', '-Werror',
                     str(root / 'fcitx5_api_probe.cc'), '-o', binary,
-                    *shlex.split(flags)], check=True, timeout=60)
-    subprocess.run([binary], check=True, timeout=15)
+                    *shlex.split(flags), '-ldl'], check=True, timeout=60)
+    subprocess.run([binary, module], check=True, timeout=15)

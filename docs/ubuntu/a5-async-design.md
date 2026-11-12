@@ -1,5 +1,7 @@
 # A5再設計：イベントループの継続性（レビュー案）
 
+**現行の承認（2026-11-12）：ユーザーは2A工程1〜6の実装・ビルド・限定試験・stagingを再承認し、都度レビュー停止を不要とした。以下の旧「製品統合未承認」「レビュー後」は過去の承認状態である。今回の停止は承認不足ではなく、末尾の所有/終了ゲートと入力安全の未解決による安全停止。2A完了・A5合格ではない。**
+
 ユーザーの追加指示により100ms/250msは過去と比較する参考測定値とする。最優先はFcitx5の入力イベントループをIPC応答待ちで長時間停止させないこと。systemd・外部常駐サービスを利用せず、helperを必須としない。新A5基準の合格・Phase再開はレビュー後とし、この文書は実装完了を意味しない。
 
 ## 比較と推奨範囲
@@ -68,3 +70,33 @@ InputContextManagerはInstanceなしで作成できる。合成ICのfocusIn/focu
 ただし、これはfixtureにroot ownerを置いた試験。製品でそのownerをFcitx5終了/unloadまで保持するAPI/lifetimeは未確定である。joinは有限fixtureの完了確認後にloop外で行うだけで、実I/Oの永久停止、プロセス終了時のjoin、addonコードunloadの安全を保証しない。FDを通知する前の取消・検証済みFD到着前の取消を区別し、後者は検証成功でも適用せず閉じる。外部サービスは使わないが、owner条件を満たすまでこの方式を製品へ接続しない。
 
 key形式はfixtureのPIDテキストで製品protobufではなく、profileの全祖先、製品prefix/版、改変・inode/exec/PID再利用競合、cold filesystemを網羅しない。connectはその場で成功したfixtureだけを扱う。実Mozkey/Hazkeyへは接続せず、実serverの起動/版/session試験も未実施。したがって移行可否は引き続き「隔離候補の局所成立、A5製品実装は保留」。参考100ms/250msを超えた準備完了時間だけで不合格にせず、loop継続性と入力/資源安全を別に評価する。
+
+## 2A再開時に適用するA5必須条件（2026-11-12）
+
+今回の承認に基づき、次を製品接続の必須条件として扱う。100ms/250msを合否閾値へ戻さない。前掲p99/maxの数値は十分なサンプルがないため測定候補のままで、都合のよい新閾値による合格は行わない。
+
+| 条件 | 必要な証拠 | 今回の判定 |
+|---|---|---|
+| loop継続 | キー/IO/timer/終了callbackに応答待ち・filesystem I/O・join/waitを置かず、処理量を有限化。350ms/2s/無応答等でheartbeatが継続 | 非同期socketの短時間fixtureは成立。終了join負例は不適合。2s/負荷/p99は未検証 |
+| 所有・終了 | addon/IC/loopの破棄後に参照せず、取消した結果/FDを採用しない。停滞・再ロードでworker/queueを増殖させず、所有と回収責任を明示 | 長寿命fixture内のみ成立。製品終了契約は未解決 |
+| 入力安全 | 最初のKeyEvent戻り値と送信対象を一意に決定。keyup/modifier順序、consumed=falseの一度だけの配送、focus/IC破棄後の未配送入力保護を保証 | 合成受付方針のみ。実engine・frontendの配送/救済は未検証 |
+| IPC境界・独立性 | 完全な準備検証→同一FD移譲→非同期送受信→epoch検証→一度だけ適用。専用profile/prefix/peer/版を維持し、他IMEへfallbackしない | PIDテキストkey/同一process peerのfixtureまで。製品protobuf/版/異製品sentinelは未統合 |
+
+### コード保持とowner寿命の再確認
+
+導入済み5.1.19の`fcitx-utils/library.h`では`LibraryLoadHint::DefaultHint`に`PreventUnloadHint`が含まれる。[公式addonloader.cpp](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx/addonloader.cpp)も既定でこのhintを使う。一方、[AddonManager::unload](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx/addonmanager.cpp)はaddon instanceを破棄する。従来の「コードunloadが未確定」という調査だけでは不十分だった。コードをpinできることと、workerが使うowner/通知先/ICが生き続けることは別の条件である。
+
+`worker_owner_fixture.cc`は350ms停止workerを持ち、destructorで取消フラグ設定とjoinを行う負例。`fcitx5_owner_gate.h`は実Fcitx5 Libraryでロード/ラッパーunloadし、RTLD_NOLOADでコード保持を確認した上で、実EventLoopの10ms timerからownerを破棄する。測定は破棄340.195ms・heartbeat最大遅れ340.208ms・周期41回。`REJECTED_FOR_PRODUCT`の検出成功であり、A5成功ではない。実AddonManager/IMEのload/unloadは実行していない。有限sleepは停止I/Oのモデルであり、実filesystemを350ms停止した試験ではない。
+
+| 終了方式 | 判定と残件 |
+|---|---|
+| addon destructorでjoin | 停止中syscallが取消を見ない間、入力loopを止める。負例で不採用 |
+| ownerを破棄してdetach | owner/eventfd/loopへの遅延参照があればUAF/FD再利用競合。コードpinだけでは解決せず不採用 |
+| コードpin＋プロセス寿命の専用registry | 候補として残る。job自身が資源を所有し、addonへの参照を断ち、取消後のFDを閉じる設計が必要。永久停滞時の所有、再ロード時の上限、プロセス終了時の静的破棄との競合、最終回収を未検証。今回この方式が不可能だと証明したわけではない |
+| Fcitx5/coreへの新しい回収owner追加 | API/所有契約の拡張に当たり、既存環境やFcitx5本体を変更しない今回の範囲では採用しない |
+
+### キー配送と製品IPCへの接続を保留する理由
+
+非同期送信の前にfilterAndAcceptしないと、元のキーがpass-throughした後のserver応答で遡及consumeはできない。先にconsumeすれば、consumed=falseの応答を待つ間にfocus移動/IC破棄が起きた場合の未配送入力を誰が保持し、どこへ一度だけ届けるかが必要になる。旧IC/新しい欄へ無条件forward/commitする方法や、結果不明の要求の再送は入力安全条件に反する。既存試験の救済6レコードはこの製品側の配送/救済を実装していない。前処理で消費を決定する方式も、現在のserverのconsumed判定との等価性は未証明。
+
+したがって今回は、コードpin＋joinを安全解として接続せず、安全停止する。全方式の一般的な実現不能を主張するものではなく、現在の製品境界で安全性を立証できなかったという判定。製品移行にはregistry方式の所有/終了検証と、focus/破棄を含む未配送キーの明示的な保護・配送契約および隔離試験が必要。同期clientをUIから呼ぶ、検証を省略する、外部常駐サービスへ移す、といった回避は採用しない。

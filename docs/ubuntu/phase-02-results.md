@@ -1,5 +1,13 @@
 # Phase 2 実行結果
 
+## 現行の判定（2026-11-12）
+
+**2A工程1〜6の実施は再承認されたが、A5の安全なworker終了・キー配送契約を確立できず、安全停止。2A未完了、2Bへ移行不可。通常の工程間レビュー待ちを理由に停止したものではない。**
+
+`feat/ubuntu-phase2a`の開始HEADは`8f39184501cadca22666ae50e9f0533e991704cb`、開始時clean。既存worktreeを継続使用した。Fcitx5の`PreventUnloadHint`によるコード保持を確認したが、350ms停止workerを所有するfixtureの破棄は340.195ms、実イベントループの最大遅れは340.208msだった。これは要求応答が100ms/250msを超えたためではなく、終了callbackがjoinでloopを止める構造の不適合である。詳細・A1〜A7・未検証事項は末尾「2A再開時の安全ゲート」を参照。
+
+製品ソース・工程2〜6・専用stagingは変更/作成していない。新規の共有ライブラリは一時領域の負例fixtureであり、IMEアドオンの成果物ではない。IME起動・設定変更・sudo/apt・2B以降・main統合は未実施。以下の旧「最新状態」「未承認」は各実施時点の履歴で、この節を優先する。
+
 **現行方針：ユーザー指示でA5を入力イベントループの長時間停止防止へ再設計。100ms/250msは参考値として保持する。[新設計・受入条件案](a5-async-design.md)と末尾のPoC結果はレビュー待ちで、A5合格・製品統合・工程再開は未承認。以下の旧停止条件と実測は履歴である。**
 
 **最新状態：helperのaddon unload後までの回収責任を確認できず、今回の明示的な停止条件によりA5の隔離実装を開始しない。既存PoCの軽量CI組込みと調査記録だけを実施し、A5未達・工程1停止を維持する。詳細は末尾を参照。**
@@ -513,3 +521,53 @@ fixture keyはPID文字列で製品protobuf/版/prefixを扱わず、profile全�
 `/usr/bin/python3 tests/ubuntu/run_fcitx5_api_probe.py`をsandbox外で実行し、既存Fcitx5 5.1.19・g++ C++20/-pthread/-O2/-Wall/-Wextra/-Werrorで単独build。最終試験は既存9 loopシナリオ＋IC契約、追加3キーシナリオ＋7準備シナリオすべて成功。既存の遅延応答は350.108ms、断片は410.088ms。非ブロッキング8 loopの最大周期遅れ0.477msに対し、Defer内350ms停止の負例は350.070msの遅れを検出した。100ms/250msは参考値であり、p99/製品合格は判定しない。
 
 軽量CIの既存API runnerが新headerを含めて実行する。開発ファイル不足の場合は従来通りNOT EXECUTED。製品ソース・既存52ケース・旧PoCを変更せず、辞書/モデル取得・全件回帰・実IME起動・既存設定変更は0。新規依存導入も行わない。構文/差分と既存資産保護を確認し、対象のみcommit/pushする。CIの実行状態・remote HEAD一致は完了報告へ記録する。
+
+## 2A再開時の安全ゲート（2026-11-12）
+
+### 承認・基点・作業範囲
+
+ユーザーは2Aの残作業を一括承認し、通常の工程間レビュー停止を不要とした。製品実装・限定ビルド・stagingまでが範囲内である。一方、解決できない安全問題では停止する指示を維持。これに従い、工程1のworker終了とキー配送の安全性を先に調べた。承認済みの工程2〜6を「未承認」と取り違えて止めたものではない。
+
+開始HEAD/remote作業ブランチは`8f39184501cadca22666ae50e9f0533e991704cb`で一致、originは`git@github.com:Minoru-kuma/mozkey_forubuntu_mk.git`、remote mainは`b489fca1561bf12ff6b43205378220163d71c21c`。既存`feat/ubuntu-phase2a`worktreeはcleanだった。AGENTS.md・PLANS.md・Phase 2計画/結果・A5設計・CI運用・既存C++/Python PoCを確認した。mainとの統合、rebase、force push、PR作成は行わない。
+
+### 実装・故障注入と測定
+
+新規`tests/ubuntu/worker_owner_fixture.cc`と`fcitx5_owner_gate.h`を既存C++ runnerへ接続。Fcitx5 Libraryの既定PreventUnloadHintによるコード保持と、owner破棄時のjoinによるloop停止を分けて検証した。ソース確認は[公式5.1.19 loader](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx/addonloader.cpp)・[manager](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx/addonmanager.cpp)と導入済みヘッダーに基づく。実AddonManager/Instance/IMEは起動しない。
+
+`/usr/bin/python3 tests/ubuntu/run_fcitx5_api_probe.py`で一時領域に負例.soとprobeを順番にコンパイル。既存Fcitx5Core/Utils 5.1.19とg++ C++20/-pthread/-O2/-Wall/-Wextra/-Werrorを使用。buildは同時1件でjobs=2以下。停止中I/Oの代わりに350msの有限sleepを入れたモデルで、無期限停止やcold filesystemの直接試験ではない。
+
+| 測定対象 | 実測・判定 |
+|---|---|
+| コード保持後、10ms timerからowner破棄 | destructor 340.195ms、5ms heartbeat最大遅れ340.208ms、41周期。join方式を製品用として拒否 |
+| 非同期socketの正常/遅延/断片/切断/無応答/取消/focus/破棄 | 即応10.057ms、遅延350.065ms、断片410.046ms。8条件の最大heartbeat遅れ1.237ms。取消/focus/破棄のcommit 0 |
+| Defer内350ms停止の既存負例 | heartbeat遅れ345.078ms。負例を検出 |
+| 既存3キー条件 | stable:受付6/転送4/commit1。focus-away/back:転送0/commit0/救済6。engine返却は全0で、受付方針は合成 |
+| 既存7準備条件 | 350.169〜350.392ms、各69周期、最大heartbeat遅れ0.438ms。正常だけ適用、権限/symlink/PID/exe不一致は拒否、取消後の検証済FDは回収 |
+
+この実行の`FCITX5_API_PROBE PASS`は期待した負例拒否と既存fixtureの成功を示す。A5/製品試験の合格を示さない。コードpinは確認できたが、ownerの安全な終了を自動的に保証しない。参考100ms/250ms超過だけで不合格にしたのではなく、joinがloopを占有することを問題とした。最終的なFD回収検査は新しいownerゲートも含めて行う。
+
+FD数の検査範囲をownerゲートの前から全試験後まで広げた最終再実行も成功。owner破棄339.682ms/heartbeat遅れ339.682ms、非同期8条件の最大遅れ2.547ms、350ms応答350.055ms、断片410.077ms、Defer負例の遅れ350.082ms。準備7条件は350.240〜350.437ms/各69周期/最大遅れ0.281msだった。ゲートを含めてFD数は不変で、全workerを終了回収した。負例の有限350ms停止を回収できたことを、実I/O永久停止の回収保証に拡張しない。
+
+### 未解決と安全停止
+
+単純joinは長時間停止、所有を捨てたdetachはデータ寿命を保証しない。プロセス寿命の専用registryは代替候補であり、一般的な実現不能は断定しない。ただし永久停止・addon再ロード時の上限・終了時の静的破棄/通知先失効を含む所有/回収を立証できていない。Fcitx5本体や既存環境へ回収機構を追加する変更は今回の範囲外。
+
+さらに合成キーキューの「救済6件」は、focus移動/IC破棄後に実アプリへ安全に一度だけ届ける証拠ではない。同期KeyEvent返却と非同期consumed判定の間を接続する受付/保護/配送契約が未完成。frontend専用blockerや古いICへの無条件配送は採用しない。製品protobuf、専用profile/prefix/版、実serverへの接続準備と実sessionも未統合。このまま製品へ接続する安全性を保証できず、ユーザー指定の安全停止条件を適用した。
+
+工程2〜6の製品変更・製品ビルド・専用stagingは実施していない。負例.soは一時fixtureであり、インストール入力ではない。1000要求/p99/CPU負荷、2s停滞、実filesystem停滞、Wayland/X11アプリ配送、実addon load/unload、実IME/server起動は未検証。既存52ケースの製品ソースは変更せず、過去の52成功は保持するが今回再実行したとは扱わない。
+
+### A1〜A7と2B移行
+
+| 条件 | 状態 | 証拠・不足 |
+|---|---|---|
+| A1 基点・由来 | 部分実施 | 固定SHA・既存環境/辞書hash・76資産を保持。製品採用ファイル/ライセンスmanifestは未作成 |
+| A2 独立性 | 未達 | 専用ID/profile/IPC/exportと製品異接続負試験は未実装。今回他IMEに接続/変更しなかったことと区別 |
+| A3 ビルド | 未達 | 製品.so/server/tool/stagingなし。単体fixtureのビルド成功で代替しない |
+| A4 callback | 未達 | 既存API/epochの限定fixtureのみ。製品protocol全フィールド/UI/候補経路は未統合 |
+| A5 IPC応答性・安全 | 未達 | socket段階は局所成立、owner join負例は不適合。入力保護/配送・製品IPC準備/終了契約が未解決 |
+| A6 既存回帰 | 部分実施 | 既存52成功資産は保持。今回は関連C++ fixtureのみ。製品独立設定OFF/ON・package回帰・全OSは未実施 |
+| A7 資源・保護 | 今回の範囲で充足 | 既存資産/元worktree差分を保持。新規依存/辞書/モデル取得なし。jobs上限内。設定変更/実IME起動なし。製品未作成部分の安全性を示すものではない |
+
+2A未完了、2B移行不可。全6系統フルCIは2A完了条件に達していないため今回は起動しない。通常pushのLint・限定Linux・Zenz軽量CIと、ローカルの実API試験を区別して完了報告する。Ubuntu 24.04の軽量CIが実APIを開発ファイル不足でNOT EXECUTEDとする場合は、成功扱いで上書きしない。
+
+保護確認では`P2/logs/baseline.json`の76ファイルすべてSHA-256一致、元worktreeのステージ済み/未ステージ差分hashも一致。`.local`全体は3,993,184KiB（約3.81GiB、60GiB未満）で、新規大容量取得は0。構文・参照先・差分検査を行い、このタスクのテスト/文書だけを明示してcommit/pushし、remote HEAD一致とpush後の軽量CI状態を完了報告へ記す。
