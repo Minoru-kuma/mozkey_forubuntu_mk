@@ -777,3 +777,19 @@ buildifier `--mode=check -r src`、`git diff --check`、workflow YAML/埋込shel
 | A7 資源・保護 | 今回の範囲で充足 | jobs=2、取得禁止cache build、workspace約6.1GiB。元差分/76資産・旧staging保持、実IME/個人設定への変更なし |
 
 2Aを完了扱いせず、2Bへは移行しない。次に必要なのは保留入力の救済/終了時保全・満杯時順序・compose/keyup、worker/runtime終了とserver lifecycleの解決、許可された分離環境での製品全経路検証、同一対象SHAの全6系統CI成功。安全性の未証明を数値目標の問題に置き換えず、危険な機能は有効化しない。
+
+### 実装SHA・staging・push後の実CI
+
+実装`ad266957235f2f0395c8a3a145097e9b3bc8e707`を`origin/feat/ubuntu-phase2a`へpushし、`git ls-remote`でHEAD一致を確認した。`P2/staging-ad2669572/manifest.json`は同じrevision、dirty=false、60ファイルで全hashを照合した。最終限定runは終了code0、15.326秒、workspaceピーク6,523,076,608 bytes、RX差分上限3,806,682 bytes（依存取得量そのものではない）。依存取得は禁止したまま、原worktree差分と基準76資産の保持を再確認した。
+
+同じ実装SHAに対し、通常pushの実際のActionsは次の3件がcompleted/success（attempt1）だった。
+
+| workflow | 実行結果 |
+|---|---|
+| Lint | [success / 43367332537](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43367332537) |
+| Linux limited | [success / 43367332709](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43367332709) |
+| Zenz runtime lock | [success / 43367332851](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43367332851) |
+
+Linux jobログでは既存6targetが全てcacheによる成功、helper/非同期モデルPoCも成功だった。Fcitx5 5.1.19+ SDKがないため、実APIと新規3targetを含む製品境界試験は実際に**NOT EXECUTED**。新3targetの実行証拠は前述のローカル97ケースであり、CI実行成功ではない。Linux/Windows/macOS/AndroidのフルCIと全6系統成功は引き続き未検証。
+
+この追記は結果記録のみで実装/受入判定を変えない。追記後のHEADでも新規stagingへ再配置し、作業ブランチとの一致、dirty=false、同じ60ファイルhashを確認して報告する。追記commitのCIを実装SHAの結果から類推せず、最終報告で対象を区別する。
