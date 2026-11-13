@@ -33,6 +33,7 @@ struct PreparationWorker::Root {
   std::condition_variable completed;
   std::shared_ptr<State> slot;
   bool pending = false;
+  std::atomic<bool> sealed{false};
   std::thread worker;  // Owned by the process root; never an unowned detach.
   void Run() {
       for (;;) {
@@ -81,7 +82,7 @@ PreparationWorker::PreparationWorker(std::shared_ptr<State> state)
 std::unique_ptr<PreparationWorker> PreparationWorker::Start(Job job) {
   auto& root = ProcessRoot();
   std::unique_lock lock(root.mutex, std::try_to_lock);
-  if (!lock.owns_lock()) return nullptr;
+  if (!lock.owns_lock() || root.sealed.load()) return nullptr;
   if (root.slot && !root.slot->done.load()) return nullptr;
   root.slot.reset();
   auto state = std::make_shared<State>(std::move(job));
@@ -128,9 +129,11 @@ bool PreparationWorker::WaitForProcessExit(std::chrono::milliseconds budget) {
   budget = std::clamp(budget, 0ms, 390ms);
   const auto end = std::chrono::steady_clock::now() + budget;
   auto& root = ProcessRoot();
+  root.sealed.store(true);
   std::unique_lock lock(root.mutex, std::try_to_lock);
   if (!lock.owns_lock()) return false;
   const auto state = root.slot;
+  if (state) state->cancelled.store(true);
   return !state || root.completed.wait_until(lock, end, [&] {
     return state->done.load();
   });

@@ -12,7 +12,10 @@ std::unique_ptr<PreparationWorker> StartConnectionPreparation(
   return PreparationWorker::Start(
       [endpoint = std::move(endpoint), budget](const std::atomic<bool>& cancelled) {
         if (cancelled.load()) return -1;
-        auto deadline = LinuxDeadline::After(LinuxDeadline::Now, budget);
+        const auto end = LinuxDeadline::Now() + budget;
+        LinuxDeadline deadline([&cancelled, end] {
+          return cancelled.load() ? end : LinuxDeadline::Now();
+        }, end);
         return PrepareLinuxDeadlineSocket(endpoint, deadline);
       });
 }

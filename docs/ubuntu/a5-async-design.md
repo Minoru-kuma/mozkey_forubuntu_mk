@@ -1,5 +1,7 @@
 # A5設計・暫定受入条件：イベントループの継続性
 
+**2026-11-13製品側接続の現状：同期ClientFactoryをIO/Timer/Defer駆動のclient/sessionへ置換し、準備済み同一FD、キーjournal、取消・UI適用ガード、worker上の設定I/Oを接続した。18新規ケースと関連回帰、実APIの隔離試験を実施するが、実IME/serverでの成功を意味しない。入力の安全な救済と終了時保全、実keyup/反復/compose、worker/runtime終了、server起動/セッション解放が未達・未検証。factoryは引き続き常に拒否。最新判定は[実行結果](phase-02-results.md)末尾を優先し、過去の保留/停止は当時の記録として保持する。**
+
 ## 現行方針と独立工程（2026-11-12追加指示）
 
 本節を以下の旧基準/停止判定に優先する。前回のjoin負例で不適合だったのは入力loop内のowner破棄であり、全方式の実現不能ではなかった。A5未解決を理由に独立工程を全停止せず、2Aの分離・ビルド・限定検証・stagingを進める。未達部分を合格扱いせず、実IME起動/導入と2B以降は行わない。
@@ -129,3 +131,26 @@ key形式はfixtureのPIDテキストで製品protobufではなく、profileの�
 非同期送信の前にfilterAndAcceptしないと、元のキーがpass-throughした後のserver応答で遡及consumeはできない。先にconsumeすれば、consumed=falseの応答を待つ間にfocus移動/IC破棄が起きた場合の未配送入力を誰が保持し、どこへ一度だけ届けるかが必要になる。旧IC/新しい欄へ無条件forward/commitする方法や、結果不明の要求の再送は入力安全条件に反する。既存試験の救済6レコードはこの製品側の配送/救済を実装していない。前処理で消費を決定する方式も、現在のserverのconsumed判定との等価性は未証明。
 
 したがって今回は、コードpin＋joinを安全解として接続せず、安全停止する。全方式の一般的な実現不能を主張するものではなく、現在の製品境界で安全性を立証できなかったという判定。製品移行にはregistry方式の所有/終了検証と、focus/破棄を含む未配送キーの明示的な保護・配送契約および隔離試験が必要。同期clientをUIから呼ぶ、検証を省略する、外部常駐サービスへ移す、といった回避は採用しない。
+
+
+## 製品側非同期境界・所有契約（2026-11-13）
+
+`MozcState`は物理キーのraw symbol/code/modifier、release、時刻、generationを最大16件のprocess-owned journalへ格納してからconsumeを返す。初回GET_CONFIG完了まで翻訳/送信をdeferし、CREATE_SESSION→SET_REQUEST→GET_CONFIG/各要求を直列化する。送信対象はworkerがprofile/protobuf key/private path/readlink/UID/PID/exe/版/製品を検証した同一FDであり、loopへ戻って別socketへ再接続しない。各要求でSO_PEERCREDとsession IDも照合する。IPC失敗をserver自動起動、別IMEへのfallback、要求再送で隠さない。
+
+filesystemとprofile cache/NSSのmutexはworker上へ置く。`AsyncConfigFile`も明示的なFcitx PkgConfig root配下の`conf/mozkey.conf`だけをworkerで読む/一時ファイルからrenameする。loop上のStandardPath::userDirectoryは5.1.19のcached getterを使用する（deprecated警告あり）。`AsyncRpc`はMSG_DONTWAIT、IO event、absolute Timer、完了Deferを使い、1dispatch最大64KiB、要求/応答最大1MiB、operation初期予算2s、worker busy時5ms再試行を予算内だけ行う。これは入力表示の受入目標を2sへ変更したものではない。無応答時にloopを止めず失敗を確定する上限である。OSのschedulerとsyscall自体の厳密な上限は保証しない。
+
+応答はtokenで一度だけ配送し、UI/modelを組み立ててから削除・確定・描画する。それぞれの外部作用の間にIC watch/State lifetime/focus/IME/generationを確認する。再変換は選択snapshot/cursor/anchorの再一致を必要とし、古い候補ID/page callbackもgenerationが違えば採用しない。live設定とdelayを要求へ付け、callback commandは全フィールドを保持する。応答に含まれるtool/browserの自動起動、clipboard fallback、未検証の同期toolメニュー起動は無効。
+
+focus移動/IME切替/IC・addon破棄は応答待ちもjoinも行わず、timer/IO/FDを閉じて入力を保留する。物理入力がある応答適用中に破棄された場合もdelivering frameと不確定outcomeを残し、次の要求で上書きしない。記録は最大32context、process内だけで保持し、回復メニューは明示的な閲覧だけを行う。結果不明のcommitを自動再送/確定しない。
+
+workerはprocess rootのjoinable thread memberが単一slot/jobを所有する。jobはUI/IC/addonへの参照を持たず、取消後のFDは閉じる。Fcitx5既定loaderのコードpinを前提とし、通常loop終了時だけ全ownerを取消しrootをsealして最大390ms待つ（400msから10msをdispatch/unwind用に留保）。390ms経過後にもworkerが止まらない場合のC++ runtime/static破棄との競合や最終回収は未証明であり、単にownerが存在することを「安全な終了完了」とは扱わない。focusやunloadへこの待機を転用しない。
+
+### ロード解除までの必須未解決条件
+
+- 保留入力を安全に取り出す/復元する手段、明示的な解決・破棄の承認、process終了時の保全がない。memoryに残すだけでは文字消失禁止の完成条件を満たさない。
+- queue満杯では新しいキーをconsumeせず旧キーを保留するため、appが受ける順序と旧入力救済の整合が未証明。Wayland/X11のkeyup、repeat、modifier、dead-key/composeを実frontendで検証していない。以前の同期compose経路をそのまま使わず、今の経路ではcompose互換性は未達。
+- UI/候補/live/callback/再変換の製品接続はコンパイル済みだが、実engine/frontendとserverを使うend-to-end試験は未実施。削除後・確定後にfocusが変わる部分適用の安全な救済も未完成。
+- 準備I/Oが永久停滞したworkerとruntime終了の契約、実AddonManager終了順序、初回thread生成/高負荷での最大loop遅延は未証明。
+- 専用serverの安全な非同期起動・回収とDELETE_SESSIONによるserver側session解放は未実装。起動済みと仮定したfixtureの成功を通常利用成功へ読み替えない。
+
+新目標は300ms未満の暫定表示目安、live500ms程度/約1sの評価、通常終了のみ400ms。旧100/250msは参考値として残す。短時間の合成測定や限定ケース成功をA5合格とせず、上記安全条件と全6系統CIの証拠が揃うまでfactoryは解除しない。

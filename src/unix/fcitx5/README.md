@@ -4,12 +4,16 @@ This is an incomplete opt-in Linux build. **Do not install or register it.**
 The addon definition has `Enabled=False` and the V2 factory always returns
 `nullptr`. Editing the configuration does not bypass this gate.
 
-The selected frontend is compiled, but its ported synchronous client has not
-been replaced by the nonblocking product session/key path. The preparation
-worker and callback scheduler have isolated tests. They do not establish real
-frontend key consumption, focus/IC destruction recovery, or safe product exit
-while third-party runtime code is in flight. See the current results in
-`docs/ubuntu/phase-02-results.md` and `a5-async-design.md`.
+The frontend now uses IO/Timer/Defer-driven RPC and a per-context asynchronous
+session. Profile/key/peer and dedicated configuration I/O run on the single
+owned preparation worker. Physical keys are recorded before consumption;
+late/failing replies suspend delivery and retain input in process memory.
+This is still **not input-safe enough to activate**: process-exit recovery,
+actual frontend key release/repetition, session cleanup/server startup and
+worker/runtime shutdown remain unverified. The recovery menu only inspects
+retained data; it does not replay uncertain effects. Server-response launches,
+GUI tool menu launching and clipboard fallback are unavailable. See the current
+results in `docs/ubuntu/phase-02-results.md` and `a5-async-design.md`.
 
 Build explicitly from `src/`, using the existing Phase 1 toolchain/cache and
 an isolated build HOME/XDG environment as recorded in the Phase 2 results:
@@ -19,7 +23,8 @@ bazelisk build //unix/fcitx5:stage_inputs --//:linux_mozkey=true \
   --config=release_build --jobs=2 --repository_disable_download
 bazelisk test //unix/fcitx5:callback_queue_test \
   //unix/fcitx5:connection_preparation_test \
-  //unix/fcitx5:frontend_boundary_test \
+  //unix/fcitx5:frontend_boundary_test //unix/fcitx5:async_session_test \
+  //unix/fcitx5:input_pipeline_test //unix/fcitx5:async_config_test \
   --//:linux_mozkey=true --config=release_build --jobs=2
 ```
 

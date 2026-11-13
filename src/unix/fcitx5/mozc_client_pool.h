@@ -46,7 +46,7 @@ class MozcClientPool : public TrackableObject<MozcClientPool> {
   friend class MozcClientInterface;
 
  public:
-  MozcClientPool(PropertyPropagatePolicy initialPolicy);
+  MozcClientPool(PropertyPropagatePolicy initialPolicy, EventLoop& loop);
 
   void setPolicy(PropertyPropagatePolicy policy);
   PropertyPropagatePolicy policy() const { return policy_; }
@@ -58,6 +58,7 @@ class MozcClientPool : public TrackableObject<MozcClientPool> {
       const std::string& key, std::unique_ptr<MozcClientInterface> client);
   void unregisterClient(const std::string& key);
   PropertyPropagatePolicy policy_;
+  EventLoop& loop_;
   std::unordered_map<std::string, std::weak_ptr<MozcClientInterface>> clients_;
 };
 

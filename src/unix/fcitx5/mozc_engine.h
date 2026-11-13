@@ -38,6 +38,7 @@
 #include <fcitx/menu.h>
 
 #include <memory>
+#include <unordered_set>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,7 @@
 #include "unix/fcitx5/mozc_client_interface.h"
 #include "unix/fcitx5/mozc_client_pool.h"
 #include "unix/fcitx5/mozc_state.h"
+#include "unix/fcitx5/async_config.h"
 
 namespace fcitx {
 
@@ -66,15 +68,12 @@ FCITX_CONFIG_ENUM_NAME_WITH_I18N(CompositionMode, N_("Direct"), N_("Hiragana"),
                                  N_("Full ASCII"), N_("Half Katakana"));
 
 FCITX_CONFIGURATION(
-    MozcEngineConfig, const std::string toolPath_ = mozc::FileUtil::JoinPath(
-                          mozc::SystemUtil::GetServerDirectory(), "mozkey_tool");
-    std::string toolCommand(const char* arg) {
-      return stringutils::concat(toolPath_, " ", arg);
-    }
-
+    MozcEngineConfig,
     OptionWithAnnotation<CompositionMode, CompositionModeI18NAnnotation>
         initialMode{this, "InitialMode", _("Initial Mode"),
                     mozc::commands::HIRAGANA};
+    Option<bool> liveConversion{this, "LiveConversion", _("Live conversion"), false};
+    Option<int> liveDelay{this, "LiveDelay", _("Live conversion delay (ms)"), 500};
     Option<bool> verticalList{this, "Vertical", _("Vertical candidate list"),
                               true};
     OptionWithAnnotation<ExpandMode, ExpandModeI18NAnnotation> expandMode{
@@ -88,14 +87,7 @@ FCITX_CONFIGURATION(
     Option<Key> expand{this, "ExpandKey", _("Hotkey to expand usage"),
                        Key("Control+Alt+H")};
 
-    ExternalOption configTool{this, "ConfigTool", _("Configuration Tool"),
-                              toolCommand("--mode=config_dialog")};
-    ExternalOption dictTool{this, "Dictionary Tool", _("Dictionary Tool"),
-                            toolCommand("--mode=dictionary_tool")};
-    ExternalOption addTool{this, "Add Word", _("Add Word"),
-                           toolCommand("--mode=word_register_dialog")};
-    ExternalOption aboutTool{this, "About Mozc", _("About Mozkey"),
-                             toolCommand("--mode=about_dialog")};);
+    );
 
 class MozcModeSubAction : public SimpleAction {
  public:
@@ -110,6 +102,7 @@ class MozcModeSubAction : public SimpleAction {
 
 class MozcEngine final : public InputMethodEngineV2 {
  public:
+  std::weak_ptr<int> lifetime() const { return lifetime_; }
   MozcEngine(Instance* instance);
   ~MozcEngine();
   Instance* instance() { return instance_; }
@@ -133,6 +126,8 @@ class MozcEngine final : public InputMethodEngineV2 {
   auto factory() const { return &factory_; }
 
   MozcState* mozcState(InputContext* ic);
+  void registerState(MozcState* state) { states_.insert(state); }
+  void unregisterState(MozcState* state) { states_.erase(state); }
   AddonInstance* clipboardAddon();
 
   void compositionModeUpdated(InputContext* ic);
@@ -147,18 +142,22 @@ class MozcEngine final : public InputMethodEngineV2 {
   void ResetClientPool();
   PropertyPropagatePolicy GetSharedStatePolicy();
 
+  std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
   Instance* instance_;
   const std::unique_ptr<MozcResponseParser> parser_;
   std::unique_ptr<MozcClientInterface> client_;
   std::unique_ptr<MozcClientPool> pool_;
+  std::unordered_set<MozcState*> states_;
   FactoryFor<MozcState> factory_;
+  std::unique_ptr<EventSource> exitHandle_;
+  std::unique_ptr<mozc::fcitx5::AsyncConfigFile> configIo_;
   SimpleAction toolAction_;
   std::vector<std::unique_ptr<MozcModeSubAction>> modeActions_;
   std::unique_ptr<HandlerTableEntry<EventHandler>> globalConfigReloadHandle_;
 
   SimpleAction configToolAction_, dictionaryToolAction_, addWordAction_,
       aboutAction_;
-  SimpleAction separatorAction_;
+  SimpleAction separatorAction_, recoveryAction_;
   Menu toolMenu_;
   MozcEngineConfig config_;
   bool deactivating_ = false;

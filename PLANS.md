@@ -3,7 +3,7 @@
 [共通ルール](AGENTS.md) / [Phase 0調査](docs/ubuntu/phase-00-audit.md) / [Phase 1仕様](docs/ubuntu/phase-01-build.md) / [Phase 2詳細計画](docs/ubuntu/phase-02-plan.md)
 
 ## 対象と承認
-**現行の承認・実施（2026-11-12追加指示）：A5を打鍵→ひらがな300ms未満（暫定）、ライブ変換500ms程度/1秒も評価、通常終了のみ400ms以内へ見直す。focus移動・IME切替へ終了待ちを転用しない。旧100ms/250msは参考値。A5未達でも独立工程2〜6を進める承認に基づき、専用ビルド/名前・profile・IPC分離、固定SHAフロントエンドの選択移植、callback/worker/検証済FD境界の限定実装・試験、導入禁止のstagingを実施。2A全体は未完了。通常の入力と非同期消費/配送の製品接続等が残るためfactoryは常にloadを拒否する。2B移行不可。詳細は[実行結果](docs/ubuntu/phase-02-results.md)末尾。既存worktreeと資産、jobs=2・60GiB・新規取得2GiB制限を維持。実IME起動・既存IME/システム設定変更・sudo/apt・2B以降・main統合は禁止。以下の過去の停止記述より本段落を優先する。**
+**現行の承認・実施（2026-11-13追加指示）：既存`feat/ubuntu-phase2a`で2A工程1〜6を継続し、非同期client/session、キー受付・消費・転送・未配送入力の保護、UI/callback/focus/再変換を製品側へ接続する。工程ごとのレビュー停止は不要。Linux専用の非同期実装と限定試験、導入禁止stagingを更新したが、保留入力の安全な復旧・プロセス終了時保全、実frontendのkeyup/反復、workerとruntimeの終了、serverの起動/セッション解放等が未達・未検証でありfactoryは常にloadを拒否する。全6系統CIも未実行で、2A未完了・2B移行不可。A5は打鍵→ひらがな300ms未満（暫定）、ライブ変換500ms程度/1秒も評価、通常終了のみ400ms以内、旧100ms/250msは参考値。数値超過だけで工程を停止しないが入力損失/重複/誤配送・他IME干渉は認めない。詳細は[実行結果](docs/ubuntu/phase-02-results.md)末尾。既存資産、jobs=2・60GiB・新規取得2GiB制限を維持。実IME起動・既存IME/システム設定変更・sudo/apt・2B以降・main統合は禁止。以下の過去の停止記述より本段落を優先する。**
 
 ユーザーの最新指示でA5は入力イベントループの長時間停止防止を中心に再設計。100ms/250msは参考測定値へ変更し、Fcitx5内の非同期IPCを優先する。設計・隔離PoC・故障注入と作業ブランチへの反映を承認。新受入基準は[レビュー案](docs/ubuntu/a5-async-design.md)であり、A5合格・製品統合・次工程は承認しない。以下の旧数値目標・停止理由は履歴として保持する。
 

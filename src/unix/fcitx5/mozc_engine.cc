@@ -39,9 +39,10 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <sstream>
+#include <fcitx-utils/standardpath.h>
 
 
-#include "base/process.h"
 #include "protocol/commands.pb.h"
 #include "unix/fcitx5/i18nwrapper.h"
 #include "unix/fcitx5/mozc_client_interface.h"
@@ -133,9 +134,9 @@ static_assert(mozc::commands::NUM_OF_COMPOSITIONS == kNumCompositionModes,
 MozcEngine::MozcEngine(Instance* instance)
     : instance_(instance),
       parser_(std::make_unique<MozcResponseParser>(this)),
-      client_(createClient()),
+      client_(createClient(instance->eventLoop())),
       factory_([this](InputContext& ic) { return new MozcState(&ic, this); }) {
-  pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy());
+  pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy(), instance->eventLoop());
   for (auto command :
        {mozc::commands::DIRECT, mozc::commands::HIRAGANA,
         mozc::commands::FULL_KATAKANA, mozc::commands::FULL_ASCII,
@@ -171,41 +172,14 @@ MozcEngine::MozcEngine(Instance* instance)
     toolMenu_.addAction(&separatorAction_);
   }
 
-  instance_->userInterfaceManager().registerAction("mozkey-tool-config",
-                                                   &configToolAction_);
-  configToolAction_.setShortText(_("Configuration Tool"));
-  configToolAction_.setIcon("fcitx_mozkey_properties");
-  configToolAction_.connect<SimpleAction::Activated>([](InputContext*) {
-    mozc::Process::SpawnMozcProcess("mozkey_tool", "--mode=config_dialog");
+  // Tool launching remains unavailable until its nonblocking ownership is verified.
+
+  instance_->userInterfaceManager().registerAction("mozkey-retained-input", &recoveryAction_);
+  recoveryAction_.setShortText(_("Show retained input"));
+  recoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) {
+    if (instance_->inputMethod(ic) == "mozkey") mozcState(ic)->ShowRetained();
   });
-
-  instance_->userInterfaceManager().registerAction("mozkey-tool-dict",
-                                                   &dictionaryToolAction_);
-  dictionaryToolAction_.setShortText(_("Dictionary Tool"));
-  dictionaryToolAction_.setIcon("fcitx_mozkey_dictionary");
-  dictionaryToolAction_.connect<SimpleAction::Activated>([](InputContext*) {
-    mozc::Process::SpawnMozcProcess("mozkey_tool", "--mode=dictionary_tool");
-  });
-
-  instance_->userInterfaceManager().registerAction("mozkey-tool-add",
-                                                   &addWordAction_);
-  addWordAction_.setShortText(_("Add Word"));
-  addWordAction_.connect<SimpleAction::Activated>([](InputContext*) {
-    mozc::Process::SpawnMozcProcess("mozkey_tool", "--mode=word_register_dialog");
-  });
-
-  instance_->userInterfaceManager().registerAction("mozkey-tool-about",
-                                                   &aboutAction_);
-  aboutAction_.setShortText(_("About Mozkey"));
-  aboutAction_.connect<SimpleAction::Activated>([](InputContext*) {
-    mozc::Process::SpawnMozcProcess("mozkey_tool", "--mode=about_dialog");
-  });
-
-  toolMenu_.addAction(&configToolAction_);
-  toolMenu_.addAction(&dictionaryToolAction_);
-  toolMenu_.addAction(&addWordAction_);
-  toolMenu_.addAction(&aboutAction_);
-
+  toolMenu_.addAction(&recoveryAction_);
   toolAction_.setMenu(&toolMenu_);
 
   globalConfigReloadHandle_ =
@@ -215,29 +189,55 @@ MozcEngine::MozcEngine(Instance* instance)
                               return true;
                             });
 
+  exitHandle_ = instance_->eventLoop().addExitEvent([this](EventSource*) {
+    configIo_.reset();
+    for (auto* state : states_) state->Shutdown();
+    if (client_) client_->Cancel();
+    mozc::fcitx5::PreparationWorker::WaitForProcessExit(std::chrono::milliseconds(400));
+    return true;
+  });
   reloadConfig();
 }
 
-MozcEngine::~MozcEngine() {}
+MozcEngine::~MozcEngine() {
+  lifetime_.reset();
+  configIo_.reset();
+  exitHandle_.reset();
+  for (auto* state : states_) state->Shutdown();
+  if (client_) client_->Cancel();
+}
 
 void MozcEngine::setConfig(const RawConfig& config) {
-  config_.load(config, true);
-  safeSaveAsIni(config_, "conf/mozkey.conf");
-  ResetClientPool();
+  config_.load(config, true); ResetClientPool();
+  RawConfig copy; config_.save(copy);
+  std::ostringstream stream; writeAsIni(copy, stream);
+  configIo_.reset();
+  configIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(),
+      StandardPath::global().userDirectory(StandardPath::Type::PkgConfig), stream.str(),
+      [](bool, std::string) {});
+}
+void MozcEngine::reloadConfig() {
+  configIo_.reset();
+  configIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(),
+      StandardPath::global().userDirectory(StandardPath::Type::PkgConfig), std::nullopt,
+      [this](bool ok, std::string data) {
+        if (!ok) return;
+        RawConfig raw; std::istringstream stream(std::move(data)); readFromIni(raw, stream);
+        config_.load(raw, true); ResetClientPool();
+      });
 }
 
-void MozcEngine::reloadConfig() {
-  readAsIni(config_, "conf/mozkey.conf");
-  ResetClientPool();
-}
 void MozcEngine::activate(const fcitx::InputMethodEntry& /*entry*/,
                           fcitx::InputContextEvent& event) {
   if (client_) {
     client_->EnsureConnection();
   }
   auto* ic = event.inputContext();
+  const auto watch = ic->watch();
+  const auto weak = lifetime();
   auto* mozc_state = mozcState(ic);
   mozc_state->FocusIn();
+  if (weak.expired() || !watch.isValid()) return;
   ic->statusArea().addAction(StatusGroup::InputMethod, &toolAction_);
 }
 void MozcEngine::deactivate(const fcitx::InputMethodEntry& /*entry*/,
@@ -261,7 +261,7 @@ void MozcEngine::keyEvent(const InputMethodEntry& entry, KeyEvent& event) {
 
   if (mozc_state->ProcessKeyEvent(event.rawKey().sym(), event.rawKey().code(),
                                   event.rawKey().states(), isJP,
-                                  event.isRelease())) {
+                                  event.isRelease(), event.time())) {
     event.filterAndAccept();
   }
 }
@@ -296,8 +296,10 @@ MozcState* MozcEngine::mozcState(InputContext* ic) {
 }
 
 void MozcEngine::compositionModeUpdated(InputContext* ic) {
+  auto valid = mozcState(ic)->DeliveryValid();
   for (const auto& modeAction : modeActions_) {
     modeAction->update(ic);
+    if (!valid()) return;
   }
   ic->updateUserInterface(UserInterfaceComponent::StatusArea);
 }
@@ -306,7 +308,9 @@ AddonInstance* MozcEngine::clipboardAddon() { return nullptr; }
 
 void MozcEngine::ResetClientPool() {
   instance_->inputContextManager().foreach([this](InputContext* ic) {
-    if (auto* state = this->mozcState(ic)) state->CancelCallbacks();
+    if (instance_->inputMethod(ic) == "mozkey") {
+      if (auto* state = this->mozcState(ic)) state->CancelCallbacks();
+    }
     return true;
   });
   if (pool_->policy() != GetSharedStatePolicy()) {

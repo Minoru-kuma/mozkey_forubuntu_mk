@@ -699,3 +699,81 @@ frontend境界6ケースは実移植handlerの先頭a/Space、control chord/keyu
 同SHAのpushで[Lint 43177493495](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43177493495)、[Linux限定 43177493518](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43177493518)、[Zenz 43177493498](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43177493498)はすべてsuccess。Linux限定は約2分で、helper 8/モデル5ケース成功、既定6ターゲット成功（2ターゲットはtest cache利用）。旧module hashのcache `82877dd740cbfc8028baaa158ff4748095e78a67`を復元でき、入力変更分だけを再ビルドした。
 
 ただしUbuntu 24.04にはFcitx5 5.1.19開発ファイルがなく、実API probeと新設の専用設定ON境界試験はログ上**NOT EXECUTED**だった。これらの成功証拠はローカルUbuntu 26.04の実行結果であり、CI stepのsuccessを実API成功へ読み替えていない。全6系統フルCIは引き続き未実行。後続の文書のみコミットを含めた最終remote HEADとCI状態は完了報告で確認する。
+
+## 非同期client/sessionと入力保護の製品側接続（2026-11-13）
+
+**判定：限定ビルド・97ケースと既存実API fixtureは成功。2A全体は未完了。保留入力の安全な復旧/終了時保全、実frontend契約、worker/runtime終了等を未達・未検証として、factoryの常時ロード拒否とEnabled=Falseを維持する。2B移行不可。** 工程ごとのレビュー停止は挟まず、独立して実装・試験可能な部分とstagingを更新した。
+
+### 基点・承認・保護
+
+最新AGENTS.md、PLANS.md、Phase 2計画/結果、A5設計、CI運用、既存C++/Python PoCと前回製品実装を確認した。既存worktree `P2/checkout`（`P2=.local/ubuntu-phase2a`）/`feat/ubuntu-phase2a`、開始HEAD `a823d68e62620d4d47c8e22460704f3a45b92acb`、開始時clean、origin `git@github.com:Minoru-kuma/mozkey_forubuntu_mk.git`で継続。GitHubのmainは`b489fca1561bf12ff6b43205378220163d71c21c`のまま。元worktreeのステージ済み5ファイル・未ステージ差分と、基準76資産のサイズ/SHA-256、既存cacheの存在を照合して保持した。旧stagingも上書きしない。
+
+今回の承認は2A製品側の統合・ビルド・限定試験・staging・文書・作業ブランチへのcommit/pushまで。実IME/server/toolの起動・導入、Hazkey/システム設定変更、sudo/apt、systemd/外部常駐サービス、2B以降、main統合は行わない。A5は通常表示300ms未満の暫定目安、live500ms程度/約1s評価、通常終了のみ400ms以内。100ms/250msは参考値として保持し、数値超過だけで全工程を停止しない。
+
+### 実装と製品境界
+
+| 対象 | 変更・成立した限定範囲 | 残る境界 |
+|---|---|---|
+| `async_rpc` / `async_session` | IO/Timer/Defer、非ブロッキング送受信、1dispatch64KiB、要求/応答1MiB、absolute operation予算2s。CREATE_SESSION→SET_REQUEST→要求の直列化、UID/PID/session ID検査、再送なし | 実server起動なし。初期化と実運用の互換性・server側session解放は未検証/未実装 |
+| `mozc_ipc_client` / pool | 同期ClientFactory依存を削除しper-IC非同期Submit/Cancelへ置換。GetConfig/readinessはcacheのみ | 共通client/IPC/protocolの再設計はしない。既存同期client資産は保持 |
+| 接続準備/worker | profile解決・cache mutex/NSS、protobuf key/private path/readlink/UID/PID/exe/版/製品検証をworker上へ集約し、検証済み同一FDをloopへ移譲。取消をdeadlineにも反映 | thread生成/高負荷時の最大dispatch遅延、永久停止とruntime破棄の競合は未証明 |
+| `input_pipeline` / `MozcState` | raw key/modifier/release/time/generationをconsume前にjournalへ保存。GET_CONFIG完了まで翻訳を保留。直列送信、unconsumedを一度だけ転送、token/weak lifetime/focus/IME検査。失敗・focus移動・破棄・配送中断では保留 | 実Wayland/X11のkeyup/repeat/compose、満杯時の新旧入力順序、安全な救済と終了時保全は未達 |
+| UI/live/callback/再変換 | 完全なmodelを準備してから削除/確定/描画し、作用の間に寿命/focusを再検査。古い候補/page・callback generationを拒否。選択snapshot/cursor/anchor再一致。live flag/delayを各要求へ付与 | 実engine+frontend+serverによる全経路の動作、部分適用後の救済は未検証 |
+| `async_config` | 明示されたFcitx設定root配下`conf/mozkey.conf`のみworkerでread/atomic rename。symlink/hardlink/他ownerを拒否、サイズ64KiB、取消でUI callbackを抑止 | 設定保存失敗のUI通知、実filesystem永久停止、rename前後の実障害注入は未検証 |
+| 終了/独立性 | focus/切替/unloadは待たず取消。通常loop終了のみrootをsealして取消し最大390ms待機。自動server/browser/tool起動・clipboard fallback、同期GUI toolメニュー起動を無効化 | 390ms後のworkerとC++ static/runtime終了の契約は未証明。実共存試験なし |
+
+journalはprocess内で最大32context、各16frame。配送中frameと不確定outcomeも保存し、中断後に次の応答で上書きしない。明示的なメニューで閲覧できるが、自動再送・自動確定は行わない。**メモリに残すだけでは入力保全の完成条件を満たさない。** 満杯後に新しいキーをpass-throughする場合の順序、process終了後の復旧、明示的な解決/破棄の手段は未完成。dead-key/composeも旧同期経路を引き継げておらず互換性未達。未配送キーを旧欄・別IME・新focusへ無条件に流す方法では解決しない。
+
+製品source/libraryのコンパイルとfixture試験までであり、factory拒否の.soを入力可能な完成addonと報告しない。serverを起動しない方針で接続失敗はfail-closedとなる。DELETE_SESSIONと安全な非同期起動/回収は残作業。loaderの既定コードpinとprocess root所有は、jobが残る状態でruntimeを安全に終了できることの代替証拠ではない。
+
+### 限定試験と測定
+
+既存Phase 1 toolchain/repository・disk cache、隔離HOME/XDG、`--repository_disable_download --config=release_build --jobs=2 --//:linux_mozkey=true`を使用。`P2/run_product_verified.py`/対応logが最終ソースの12ターゲットと`stage_inputs`を実行する。以前のOFF61/ON79と52ケースの成功資産を保持し、今回はONで下記を確認した。cache hitは再実行と区別してBazel logに残す。
+
+| 対象 | ケース | 結果 |
+|---|---:|---|
+| linux_deadline / client / ipc（従来の52） | 21 / 30 / 1 | 成功（入力digest一致のcache再利用を含む） |
+| system_util / process_mutex / ipc_path_manager | 3 / 3 / 5 | 成功 |
+| callback_queue / connection_preparation / frontend_boundary | 5 / 5 / 6 | 成功 |
+| async_session + RPC | 6 | 初期化/順序、0/250/500/1000ms遅延、異session、完了中破棄、350ms準備中取消、無応答/切断/サイズ超過/取消で成功 |
+| input_pipeline | 8 | consume前保存、一度だけの転送とkeyup、focus往復/破棄/遅延応答、満杯、初回設定待ち、RPC失敗、中断/破棄中の不確定結果保護で成功 |
+| async_config | 4 | 専用ファイルwrite/read、target symlink・hardlink・parent symlink拒否、開始前取消で成功 |
+| 合計 | 97 | 12ターゲット成功 |
+
+新sessionのsocketpair fixtureは実serverではない。`ASYNC_SESSION_METRIC`の測定は、0/250/500/1000ms注入に対し応答0.759/250.785/500.874/1001.09ms、5ms heartbeatの最大間隔5.109/5.126/5.426/5.385ms。全て同じ短時間低負荷runの値であり、実画面のひらがな表示・実live変換、p99/1000要求、高CPU負荷での受入成功を示さない。
+
+`/usr/bin/python3 tests/ubuntu/run_fcitx5_api_probe.py`はインストール済みFcitx5 Core/Utils 5.1.19とg++を使う独立プローブとして再実行し、`FCITX5_API_PROBE PASS`。Instance/IME/実serverは起動しない。`P2/logs/fcitx5-api-product-20261113.log`に保持した。
+
+| 実API fixture | 今回の測定・解釈 |
+|---|---|
+| 正常 / 250 / live500 / live1000 | 10.043 / 250.109 / 500.170 / 1000.060ms。API応答値であり実製品の表示時間ではない |
+| 350ms準備停止 | completion350.465ms、heartbeat最大遅れ0.094ms、69tick。実syscall検証前の有限sleep注入で、filesystem自体を止めた試験ではない |
+| root取消/回収 | cancel0.009ms、heartbeat最大遅れ0.453ms、busy拒否/最終回収成立 |
+| 通常process終了・350ms/3500ms停止 | 待機349.223msで完了 / 390.157msで未完了として打切り。終了400ms予算の限定測定であり、永久停止の安全回収成功ではない |
+| owner destructor join負例 | 340.236ms・heartbeat遅れ340.175msを検出しREJECTED_FOR_PRODUCT。負例の検出成功を製品合格に数えない |
+
+試験作成中、strict protobufの必須preedit fields不足でfixtureが失敗し、必要fieldsを補った。また単一EventLoopをexit後に再execする試験がESTALEとなり、単一run内の段階的timerへ修正した。入力安全条件や時間閾値を緩和して成功扱いしていない。daemon再起動時の最後のbuildはログ上成功したが親の終了code/metrics記録が途切れたため、稼働processがないことを確認して別名の最終runで確定した。
+
+### staging・検査・CI
+
+専用`mozkey_server`/`mozkey_tool`/factory拒否`fcitx5-mozkey.so`と定義・icons・通知・ライセンス・frontend sourceを、作業領域の新規stagingへ配置する。候補`P2/staging-async-candidate-20261113`は60ファイル、`INCOMPLETE_NOT_FOR_IME_LOAD`。ELF64/x86_64、exportが`fcitx_addon_factory_instance_mozkey`だけであること、RPATH/RUNPATHにbuild host pathがないこと、hash/manifestを検査。最終commit後は別ディレクトリへ同じ内容を再stagingし、revision・dirty=falseを確認する。旧成果物は保持し、ホストの`/usr`には配置しない。
+
+buildifier `--mode=check -r src`、`git diff --check`、workflow YAML/埋込shell構文、Python構文、来歴JSONとCI target参照を検査する。actionlint/clang-formatは未導入につき未実行、新規導入なし。StandardPathのdeprecated警告は残る。静的調査したcached getterの利用であり、将来API更新と起動時初期化負荷は別途評価する。
+
+軽量CIの既存Fcitx5 5.1.19+条件内に新規3ターゲット（async_session/input_pipeline/async_config）を追加した。既存trigger・権限・jobs=2・cache方針は保持し、SDKの追加導入・通常pushでの全面辞書/OS buildは行わない。Ubuntu 24.04でSDKがなければAPI/製品試験はNOT EXECUTEDのままであり、jobのsuccessをA5成功へ読み替えない。
+
+**全6系統CIは未実行・未検証。** このセッションには`gh`とGH_TOKEN/GITHUB_TOKENがなく、接続GitHub toolもworkflow読取り/既存runのrerunのみでdispatchを提供しない。認証/権限の回避や新規ツール導入はしない。Secure Offline Checksを対象branchで手動実行する既存経路（`gh workflow run secure-offline.yaml --ref feat/ubuntu-phase2a`、またはActions画面）と同一head_sha成功確認が必要。これはPhase完了条件を免除するものではない。通常pushの実runはpush後に確認し、静的検証と分けて記録する。
+
+### A1〜A7・次への条件
+
+| 条件 | 判定 | 証拠/未達 |
+|---|---|---|
+| A1 基点・由来 | 実施 | SHA・ライセンス通知・採用manifestを更新、既存資産保持 |
+| A2 独立性 | 部分実施・未達 | Mozkey ID/profile/IPC/path、実peer等の隔離負試験。全実行経路・実共存の最終証明なし |
+| A3 build/staging | 部分実施・未達 | 専用成果物と無効化staging更新。入力可能addonの安全条件未成立 |
+| A4 callback/UI | 部分実施・未達 | 非同期sender、完全command、candidate/live/再変換へ接続・build。実全経路の動作未検証 |
+| A5 応答性・入力安全 | 部分実施・未達 | 新session/retention/取消/終了fixture成功。入力救済・終了時保全、実frontend・runtime終了未達/未証明 |
+| A6 回帰 | 部分実施・未達 | 97限定ケースと実API fixture成功。全6系統CI、他OS、実表示/IMEは未検証 |
+| A7 資源・保護 | 今回の範囲で充足 | jobs=2、取得禁止cache build、workspace約6.1GiB。元差分/76資産・旧staging保持、実IME/個人設定への変更なし |
+
+2Aを完了扱いせず、2Bへは移行しない。次に必要なのは保留入力の救済/終了時保全・満杯時順序・compose/keyup、worker/runtime終了とserver lifecycleの解決、許可された分離環境での製品全経路検証、同一対象SHAの全6系統CI成功。安全性の未証明を数値目標の問題に置き換えず、危険な機能は有効化しない。

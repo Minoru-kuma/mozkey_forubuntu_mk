@@ -110,7 +110,8 @@ jobs:
           if pkg-config --exists 'Fcitx5Core >= 5.1.19' 'Fcitx5Utils >= 5.1.19'; then
             bazelisk test //base:system_util_test //ipc:ipc_path_manager_test \
               //unix/fcitx5:callback_queue_test //unix/fcitx5:connection_preparation_test \
-              //unix/fcitx5:frontend_boundary_test \
+              //unix/fcitx5:frontend_boundary_test //unix/fcitx5:async_session_test \
+              //unix/fcitx5:input_pipeline_test //unix/fcitx5:async_config_test \
               --//:linux_mozkey=true --config release_build --jobs=2 \
               --test_output=errors --test_timeout=60 \
               --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \

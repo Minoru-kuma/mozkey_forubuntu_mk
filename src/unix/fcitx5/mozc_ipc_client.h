@@ -1,43 +1,22 @@
+// Copyright 2026 Mozkey contributors
+// SPDX-License-Identifier: BSD-3-Clause
 #ifndef UNIX_FCITX5_MOZC_IPC_CLIENT_H_
 #define UNIX_FCITX5_MOZC_IPC_CLIENT_H_
-
-#include <memory>
-#include <string>
-#include <string_view>
-
-#include "client/client_interface.h"
-#include "protocol/commands.pb.h"
-#include "protocol/config.pb.h"
 #include "unix/fcitx5/mozc_client_interface.h"
-
+#include "unix/fcitx5/async_session.h"
 namespace fcitx {
-
-class MozcIPCClient : public MozcClientInterface {
+class MozcIPCClient final : public MozcClientInterface {
  public:
-  MozcIPCClient();
-
-  MozcIPCClient(MozcIPCClient&&) = delete;
-
-  ~MozcIPCClient();
-
+  explicit MozcIPCClient(EventLoop& loop) : session_(loop) {}
+  ~MozcIPCClient() override { session_.Cancel(); }
+  bool Submit(mozc::commands::Input input, Done done) override;
+  void Cancel() override { session_.Cancel(); }
   bool EnsureConnection() override;
-  bool SendKeyWithContext(const mozc::commands::KeyEvent& key,
-                          const mozc::commands::Context& context,
-                          mozc::commands::Output* output) override;
-  bool SendCommandWithContext(const mozc::commands::SessionCommand& command,
-                              const mozc::commands::Context& context,
-                              mozc::commands::Output* output) override;
-  bool IsDirectModeCommand(const mozc::commands::KeyEvent& key) const override;
-  bool GetConfig(mozc::config::Config* config) override;
-  void set_client_capability(
-      const mozc::commands::Capability& capability) override;
-  bool SyncData() override;
-  bool LaunchTool(const std::string& mode, std::string_view arg) override;
-  bool LaunchToolWithProtoBuf(const mozc::commands::Output& output) override;
-
+  bool GetConfig(mozc::config::Config* config) override { *config = config_; return have_config_; }
  private:
-  std::unique_ptr<mozc::client::ClientInterface> client_;
+  mozc::fcitx5::AsyncSession session_;
+  mozc::config::Config config_;
+  bool have_config_ = false;
 };
-
-}  // namespace fcitx
+}
 #endif

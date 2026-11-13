@@ -43,6 +43,7 @@
 #include "protocol/config.pb.h"
 #include "unix/fcitx5/mozc_client_interface.h"
 #include "unix/fcitx5/callback_queue.h"
+#include "unix/fcitx5/input_pipeline.h"
 
 namespace fcitx {
 inline const int32_t kBadCandidateId = -12345;
@@ -64,7 +65,7 @@ class MozcState : public InputContextProperty {
   void CancelCallbacks();
 
   bool ProcessKeyEvent(KeySym sym, uint32_t keycode, KeyStates state,
-                       bool layout_is_jp, bool is_key_up);
+                       bool layout_is_jp, bool is_key_up, uint32_t time);
   void SelectCandidate(int idx);
   void Reset();
   void FocusIn();
@@ -75,6 +76,8 @@ class MozcState : public InputContextProperty {
 
   // Displays a 'result' (aka 'commit string') on FCITX UI.
   void SetResultString(const std::string& result_string);
+  void SetDeletionRange(int offset, unsigned length);
+  std::function<bool()> DeliveryValid() const;
   // Displays a 'preedit' string on FCITX UI. This function takes ownership
   // of preedit_info. If the parameter is NULL, hides the string currently
   // displayed.
@@ -101,41 +104,19 @@ class MozcState : public InputContextProperty {
   MozcClientInterface* GetClient() const;
   void ReleaseClient();
 
-  bool SendCommand(const mozc::commands::SessionCommand& session_command,
-                   mozc::commands::Output* new_output);
+  bool SendCommand(const mozc::commands::SessionCommand& session_command);
+  void ShowRetained();
+  void Shutdown();
 
   void SetUsage(const std::string& title, const std::string& description);
 
-  void DrawAll();
+  bool DrawAll();
 
  private:
   void DisplayUsage();
-  // Sends key event to the server. If the IPC succeeds, returns true and the
-  // response is stored on 'out' (and 'out_error' is not modified). If the IPC
-  // fails, returns false and the error message is stored on 'out_error'. In
-  // this case, 'out' is not modified.
-  bool TrySendKeyEvent(InputContext* ic, const mozc::commands::KeyEvent& event,
-                       mozc::commands::Output* out,
-                       std::string* out_error) const;
-
-  // Sends 'mouse click on the candidate window' event to the server.
-  bool TrySendClick(int32_t unique_id, mozc::commands::Output* out,
-                    std::string* out_error) const;
-
-  // Sends composition mode to the server.
-  bool TrySendCompositionMode(mozc::commands::CompositionMode mode,
-                              mozc::commands::Output* out,
-                              std::string* out_error) const;
-
-  // Sends a command to the server.
-  bool TrySendCommand(mozc::commands::SessionCommand::CommandType type,
-                      mozc::commands::Output* out,
-                      std::string* out_error) const;
-
-  bool TrySendRawCommand(const mozc::commands::SessionCommand& command,
-                         mozc::commands::Output* out,
-                         std::string* out_error) const;
-
+  bool EnsurePipeline();
+  void TranslateFrame(mozc::fcitx5::InputFrame& frame);
+  bool SubmitCommand(mozc::commands::SessionCommand command);
   // Parses the response from mozc_server. Returns whether the server consumes
   // the input or not (true means 'consumed').
   bool ParseResponse(const mozc::commands::Output& raw_response);
@@ -152,6 +133,11 @@ class MozcState : public InputContextProperty {
   mutable std::shared_ptr<MozcClientInterface> client_;
   mozc::fcitx5::CallbackQueue callbacks_;
   uint64_t epoch_ = 0;
+  std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
+  std::optional<std::string> result_;
+  std::optional<std::pair<int, unsigned>> deletion_;
+  std::shared_ptr<mozc::fcitx5::RetainedInput> retained_;
+  std::unique_ptr<mozc::fcitx5::InputPipeline> pipeline_;
 
   mozc::commands::CompositionMode composition_mode_ = mozc::commands::HIRAGANA;
   mozc::config::Config::PreeditMethod preedit_method_ =

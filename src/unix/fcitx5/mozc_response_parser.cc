@@ -86,12 +86,13 @@ void AppendDescriptionString(std::string& comment,
 class MozcCandidateWord final : public CandidateWord {
  public:
   MozcCandidateWord(int id, std::string text, std::string comment,
-                    MozcEngine* engine)
-      : CandidateWord(Text(std::move(text))), id_(id), engine_(engine) {
+                    MozcEngine* engine, InputContext* ic, std::function<bool()> valid)
+      : CandidateWord(Text(std::move(text))), id_(id), engine_(engine), ic_(ic), valid_(std::move(valid)) {
     setComment(Text(std::move(comment)));
   }
 
   void select(InputContext* inputContext) const override {
+    if (inputContext != ic_ || !valid_()) return;
     MozcState* mozc_state = engine_->mozcState(inputContext);
     mozc_state->SelectCandidate(id_);
   }
@@ -99,6 +100,8 @@ class MozcCandidateWord final : public CandidateWord {
  private:
   int id_;
   MozcEngine* engine_;
+  InputContext* ic_;
+  std::function<bool()> valid_;
 };
 
 class MozcCandidateList final : public CandidateList,
@@ -108,6 +111,7 @@ class MozcCandidateList final : public CandidateList,
                     InputContext* ic, MozcEngine* engine, bool use_annotation)
       : ic_(ic), engine_(engine) {
     auto* state = engine_->mozcState(ic);
+    valid_ = state->DeliveryValid();
     setPageable(this);
     bool index_visible = false;
     if (candidates.has_footer()) {
@@ -216,7 +220,7 @@ class MozcCandidateList final : public CandidateList,
         DCHECK_NE(kBadCandidateId, id) << "Unexpected id is passed.";
       }
       candidateWords_.emplace_back(std::make_unique<MozcCandidateWord>(
-          id, std::move(value), std::move(comment), engine));
+          id, std::move(value), std::move(comment), engine, ic, valid_));
     }
   }
 
@@ -238,10 +242,12 @@ class MozcCandidateList final : public CandidateList,
   bool hasPrev() const override { return hasPrev_; }
   bool hasNext() const override { return hasNext_; }
   void prev() override {
+    if (!valid_()) return;
     auto* mozc_state = engine_->mozcState(ic_);
     mozc_state->Paging(true);
   }
   void next() override {
+    if (!valid_()) return;
     auto* mozc_state = engine_->mozcState(ic_);
     mozc_state->Paging(false);
   }
@@ -257,6 +263,7 @@ class MozcCandidateList final : public CandidateList,
 
   InputContext* ic_;
   MozcEngine* engine_;
+  std::function<bool()> valid_;
   std::vector<Text> labels_;
   bool hasPrev_ = false;
   bool hasNext_ = false;
@@ -275,10 +282,10 @@ void MozcResponseParser::UpdateDeletionRange(
     const mozc::commands::Output& response, InputContext* ic) const {
   if (response.has_deletion_range() &&
       response.deletion_range().offset() <= 0 &&
-      response.deletion_range().offset() + response.deletion_range().length() >=
+      static_cast<int64_t>(response.deletion_range().offset()) + response.deletion_range().length() >=
           0) {
-    ic->deleteSurroundingText(response.deletion_range().offset(),
-                              response.deletion_range().length());
+    engine_->mozcState(ic)->SetDeletionRange(response.deletion_range().offset(),
+                                            response.deletion_range().length());
   }
 }
 
@@ -306,9 +313,7 @@ bool MozcResponseParser::ParseResponse(const mozc::commands::Output& response,
   // We should check the mode field first since the response for a
   // SWITCH_COMPOSITION_MODE request only contains mode and id fields.
   if (response.has_mode()) {
-    mozc_state->SetCompositionMode(
-        response.mode(), !engine_->deactivating() &&
-                             engine_->instance()->inputMethod(ic) == "mozkey");
+    mozc_state->SetCompositionMode(response.mode(), false);
   }
 
   ExecuteCallback(response, ic);
