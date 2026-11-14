@@ -23,8 +23,9 @@ AsyncSession::AsyncSession(fcitx::EventLoop& loop, LinuxDeadlineEndpoint endpoin
     return PrepareLinuxDeadlineSocket(endpoint, deadline);
   };
 }
-AsyncSession::~AsyncSession() { Cancel(); }
+AsyncSession::~AsyncSession() { lifetime_.reset(); Cancel(); }
 void AsyncSession::Cancel() {
+  ++generation_;
   failed_ = true; id_ = 0;
   continuation_.reset(); notification_.reset(); preparation_timer_.reset();
   rpc_.reset(); worker_.reset(); queue_.clear();
@@ -124,10 +125,15 @@ void AsyncSession::Received(AsyncRpc::Status status, std::string data) {
       if (callback) callback(true, std::move(output));
       return;
     }
-    // Defer the next RPC before the callback; the callback may delete us.
+    // A frontend completion may submit another request, run a nested loop,
+    // cancel/close the session or delete it. Serialize application completions
+    // across that boundary; Close owns its own continuation after cancellation.
+    const auto weak = std::weak_ptr<int>(lifetime_);
+    const auto generation = generation_;
+    if (callback) callback(true, std::move(output));
+    if (weak.expired() || generation != generation_ || failed_) return;
     continuation_ = loop_.addDeferEvent([this](fcitx::EventSource*) { Next(); return true; });
     continuation_->setOneShot();
-    if (callback) callback(true, std::move(output));
     return;
   }
   continuation_ = loop_.addDeferEvent([this](fcitx::EventSource*) { Next(); return true; });

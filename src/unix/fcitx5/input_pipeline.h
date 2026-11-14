@@ -4,6 +4,7 @@
 #define MOZKEY_UNIX_FCITX5_INPUT_PIPELINE_H_
 #include <fcitx-utils/key.h>
 #include <deque>
+#include <map>
 #include <optional>
 #include <vector>
 #include "unix/fcitx5/async_session.h"
@@ -55,6 +56,8 @@ class InputPipeline {
  private:
   void Schedule();
   void Next();
+  bool ForwardRelease(const InputFrame& frame) const;
+  void RecordPhysicalDelivery(const InputFrame& frame, bool raw_forwarded);
   fcitx::EventLoop& loop_;
   std::shared_ptr<RetainedInput> record_;
   Send send_;
@@ -65,6 +68,9 @@ class InputPipeline {
   std::unique_ptr<fcitx::EventSource> defer_;
   bool active_ = false, ready_ = true;
   uint64_t token_ = 0;
+  // Per activation: a release balances any raw down already sent to the app.
+  // A missing entry may have started before activation, so it is forwarded.
+  std::map<uint64_t, bool> forwarded_down_;
   std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
 };
 }  // namespace mozc::fcitx5

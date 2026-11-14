@@ -19,11 +19,13 @@ void RunLoop(fcitx::EventLoop& loop) {
   end->setOneShot(); EXPECT_TRUE(loop.exec());
 }
 struct Fixture {
-  fcitx::EventLoop loop;
+  std::unique_ptr<fcitx::EventLoop> loop_owner;
+  fcitx::EventLoop& loop;
   std::shared_ptr<RetainedInput> record = InputRetention::Reserve();
   AsyncSession::Done complete;
   int sent = 0, applied = 0, forwarded = 0, cancelled = 0;
   bool focused = true;
+  std::function<void()> during_delivery;
   std::vector<unsigned> keys;
   std::unique_ptr<InputPipeline> pipeline;
   std::vector<std::unique_ptr<fcitx::EventSourceTime>> timers;
@@ -32,11 +34,14 @@ struct Fixture {
         [fn=std::move(fn)](fcitx::EventSourceTime*, uint64_t) { fn(); return true; });
     event->setOneShot(); timers.push_back(std::move(event));
   }
-  Fixture() {
+  explicit Fixture(std::unique_ptr<fcitx::EventLoopInterface> backend = {})
+      : loop_owner(backend ? std::make_unique<fcitx::EventLoop>(std::move(backend)) :
+                             std::make_unique<fcitx::EventLoop>()), loop(*loop_owner) {
     pipeline = std::make_unique<InputPipeline>(loop, record,
         [&](auto, auto done) { ++sent; complete = std::move(done); return true; },
         [&] { ++cancelled; }, [&] { return focused; },
         [&](auto out, auto forward) {
+          if (during_delivery) during_delivery();
           if (out.has_consumed()) ++applied;
           if (forward) { ++forwarded; keys.push_back(forward->raw.sym()); }
           return true;
@@ -89,11 +94,133 @@ TEST(InputPipelineTest, BoundedQueueProtectsPreviouslyConsumedInput) {
   EXPECT_EQ(f.record->pending.size(), 16); EXPECT_TRUE(f.record->suspended);
   EXPECT_EQ(f.sent, 0); EXPECT_EQ(f.forwarded, 0);
 }
+// The installed sd-event backend does not permit nested/restarted exec().
+// Use the public SDK backend interface for deterministic reentry injection;
+// the other fixture tests retain the real installed event-loop implementation.
+class ReentrantDeferLoop final : public fcitx::EventLoopInterface {
+ public:
+  struct Tick { bool enabled = true, once = false; fcitx::EventCallback callback; };
+  struct Source final : fcitx::EventSource {
+    explicit Source(std::shared_ptr<Tick> value) : tick(std::move(value)) {}
+    bool isEnabled() const override { return tick->enabled; }
+    void setEnabled(bool value) override { tick->enabled = value; }
+    bool isOneShot() const override { return tick->once; }
+    void setOneShot() override { tick->once = true; }
+    std::shared_ptr<Tick> tick;
+  };
+  bool Step() {
+    while (!queue.empty()) {
+      auto weak = queue.front(); queue.pop_front(); auto tick = weak.lock();
+      if (!tick || !tick->enabled) continue;
+      if (tick->once) tick->enabled = false;
+      auto callback = tick->callback; callback(nullptr); return true;
+    }
+    return false;
+  }
+  bool exec() override { ADD_FAILURE() << "use bounded Step()"; return false; }
+  void exit() override {}
+  const char* implementation() const override { return "mozkey-reentry-fixture"; }
+  void* nativeHandle() override { return nullptr; }
+  std::unique_ptr<fcitx::EventSource> addDeferEvent(fcitx::EventCallback callback) override {
+    auto tick = std::make_shared<Tick>(); tick->callback = std::move(callback);
+    queue.push_back(tick); return std::make_unique<Source>(std::move(tick));
+  }
+  std::unique_ptr<fcitx::EventSourceIO> addIOEvent(int, fcitx::IOEventFlags, fcitx::IOCallback) override {
+    ADD_FAILURE() << "unexpected I/O"; return {};
+  }
+  std::unique_ptr<fcitx::EventSourceTime> addTimeEvent(clockid_t, uint64_t, uint64_t, fcitx::TimeCallback) override {
+    ADD_FAILURE() << "unexpected timer"; return {};
+  }
+  std::unique_ptr<fcitx::EventSource> addExitEvent(fcitx::EventCallback) override { return {}; }
+  std::unique_ptr<fcitx::EventSource> addPostEvent(fcitx::EventCallback) override { return {}; }
+ private:
+  std::deque<std::weak_ptr<Tick>> queue;
+};
+TEST(InputPipelineTest, NestedDispatchCannotStartNextFrameDuringDelivery) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('a')));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('b')));
+  ASSERT_TRUE(scheduler->Step()); ASSERT_EQ(f.sent, 1);
+  f.during_delivery = [&] {
+    ASSERT_TRUE(f.record->delivering);
+    EXPECT_EQ(f.record->delivering->raw.sym(), 'a');
+    EXPECT_FALSE(scheduler->Step()); EXPECT_EQ(f.sent, 1);
+    ASSERT_TRUE(f.record->delivering);
+    EXPECT_EQ(f.record->delivering->raw.sym(), 'a');
+  };
+  f.Reply(false); EXPECT_FALSE(f.record->delivering); f.during_delivery = {};
+  ASSERT_TRUE(scheduler->Step()); EXPECT_EQ(f.sent, 2);
+  f.Reply(false); ASSERT_TRUE(scheduler->Step());
+  EXPECT_EQ(f.keys, (std::vector<unsigned>{'a', 'b'}));
+}
+TEST(InputPipelineTest, ReentrantKeySubmissionWaitsForCurrentDeliveryToFinish) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('a')));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('b')));
+  ASSERT_TRUE(scheduler->Step());
+  f.during_delivery = [&] {
+    EXPECT_TRUE(f.pipeline->Submit(Frame('c')));
+    EXPECT_FALSE(scheduler->Step()); EXPECT_EQ(f.sent, 1);
+    EXPECT_EQ(f.record->pending.size(), 2);
+  };
+  f.Reply(false); f.during_delivery = {};
+  ASSERT_TRUE(scheduler->Step()); EXPECT_EQ(f.sent, 2);
+  f.Reply(false); ASSERT_TRUE(scheduler->Step()); EXPECT_EQ(f.sent, 3);
+  f.Reply(false); ASSERT_TRUE(scheduler->Step());
+  EXPECT_EQ(f.keys, (std::vector<unsigned>{'a', 'b', 'c'}));
+}
+TEST(InputPipelineTest, HoldDuringAcceptedDeliveryKeepsUncertainRecord) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('a')));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('b')));
+  ASSERT_TRUE(scheduler->Step());
+  f.during_delivery = [&] {
+    f.pipeline->Hold("frontend-changed-owner"); EXPECT_FALSE(scheduler->Step());
+  };
+  f.Reply(true); EXPECT_FALSE(scheduler->Step());
+  EXPECT_TRUE(f.record->suspended); EXPECT_EQ(f.sent, 1);
+  ASSERT_TRUE(f.record->delivering); ASSERT_TRUE(f.record->outcome);
+  EXPECT_EQ(f.record->delivering->raw.sym(), 'a');
+  ASSERT_EQ(f.record->pending.size(), 1); EXPECT_EQ(f.record->pending[0].raw.sym(), 'b');
+}
 TEST(InputPipelineTest, ConfigurationGatePreservesFirstKeyUntilReady) {
   Fixture f; f.pipeline->SetReady(false);
   ASSERT_TRUE(f.pipeline->Submit(Frame('a')));
   f.At(2, [&] { EXPECT_EQ(f.sent, 0); f.pipeline->SetReady(true); });
   RunLoop(f.loop); EXPECT_EQ(f.sent, 1);
+}
+TEST(InputPipelineTest, ConsumedDownDoesNotForwardAnOrphanRelease) {
+  Fixture f;
+  ASSERT_TRUE(f.pipeline->Submit(Frame('a'))); ASSERT_TRUE(f.pipeline->Submit(Frame('a', true)));
+  f.At(2, [&] { f.Reply(true); }); RunLoop(f.loop);
+  EXPECT_EQ(f.sent, 1); EXPECT_EQ(f.forwarded, 0); EXPECT_TRUE(f.record->pending.empty());
+}
+TEST(InputPipelineTest, ConsumedModifierReleaseStillBalancesItsForwardedDown) {
+  Fixture f; auto down = Frame('a'); down.raw = fcitx::Key(FcitxKey_Shift_L, fcitx::KeyStates{}, 50); down.request.reset();
+  auto up = down; up.release = true; up.time = 321; up.request.emplace();
+  up.request->set_type(commands::Input::SEND_KEY); up.request->mutable_key()->add_modifier_keys(commands::KeyEvent::SHIFT);
+  ASSERT_TRUE(f.pipeline->Submit(down)); ASSERT_TRUE(f.pipeline->Submit(up));
+  f.At(2, [&] { f.Reply(true); }); RunLoop(f.loop);
+  EXPECT_EQ(f.sent, 1); EXPECT_EQ(f.keys, (std::vector<unsigned>{FcitxKey_Shift_L, FcitxKey_Shift_L}));
+  EXPECT_TRUE(f.record->pending.empty());
+}
+TEST(InputPipelineTest, RepeatedDownsKeepAnyForwardedPressUntilRelease) {
+  Fixture f; for (int i = 0; i < 3; ++i) ASSERT_TRUE(f.pipeline->Submit(Frame('a')));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('a', true)));
+  f.At(2, [&] { f.Reply(true); }); f.At(4, [&] { f.Reply(false); }); f.At(6, [&] { f.Reply(true); });
+  RunLoop(f.loop); EXPECT_EQ(f.sent, 3);
+  EXPECT_EQ(f.keys, (std::vector<unsigned>{'a', 'a'})); EXPECT_TRUE(f.record->pending.empty());
+}
+TEST(InputPipelineTest, HardwareCodePairsDownAndReleaseAcrossSymbolChange) {
+  Fixture f; auto down = Frame('A'); down.raw = fcitx::Key(FcitxKey_A, fcitx::KeyState::Shift, 38);
+  auto up = Frame('a', true); up.raw = fcitx::Key(FcitxKey_a, fcitx::KeyStates{}, 38);
+  auto other_up = up; other_up.raw = fcitx::Key(FcitxKey_a, fcitx::KeyStates{}, 39);
+  ASSERT_TRUE(f.pipeline->Submit(down)); ASSERT_TRUE(f.pipeline->Submit(up)); ASSERT_TRUE(f.pipeline->Submit(other_up));
+  f.At(2, [&] { f.Reply(true); }); RunLoop(f.loop);
+  EXPECT_EQ(f.forwarded, 1); EXPECT_EQ(f.sent, 1); EXPECT_TRUE(f.record->pending.empty());
 }
 TEST(InputPipelineTest, FailedRpcRetainsCurrentAndFollowingKeys) {
   Fixture f; ASSERT_TRUE(f.pipeline->Submit(Frame('a'))); ASSERT_TRUE(f.pipeline->Submit(Frame('b')));
@@ -233,7 +360,7 @@ TEST(InputPipelineCoreTest, RealKeyEventsPreserveModifierReleaseAndTimestampOrde
   EXPECT_EQ(ic.stamps, (std::vector<uint32_t>{100,101,102,103}));
   EXPECT_EQ(ic.releases, (std::vector<bool>{false,false,true,true})); EXPECT_TRUE(ic.commits.empty());
 }
-TEST(InputPipelineCoreTest, ComposedUnicodeCommitsOnceAndKeyupKeepsTimestamp) {
+TEST(InputPipelineCoreTest, ComposedUnicodeCommitsOnceWithoutOrphanKeyup) {
   Fixture f; fcitx::InputContextManager manager; DispatchContext ic(manager); ic.focusIn();
   f.pipeline.reset(); f.record->suspended = false; const auto watch = ic.watch();
   f.pipeline = std::make_unique<InputPipeline>(f.loop, f.record,
@@ -246,14 +373,49 @@ TEST(InputPipelineCoreTest, ComposedUnicodeCommitsOnceAndKeyupKeepsTimestamp) {
         return watch.isValid();
       });
   auto dead = Frame('a'); dead.compose = InputFrame::Compose::Pending; dead.translated = true; dead.request.reset();
+  dead.raw = fcitx::Key(FcitxKey_dead_acute);
   ASSERT_TRUE(f.pipeline->Submit(dead));
+  auto dead_up = dead; dead_up.compose = InputFrame::Compose::None; dead_up.release = true;
+  ASSERT_TRUE(f.pipeline->Submit(dead_up));
   auto completed = Frame('e'); completed.compose = InputFrame::Compose::Complete; completed.composed_text = "é";
   ASSERT_TRUE(f.pipeline->Submit(completed)); auto up = Frame('e', true); up.time = 321;
   ASSERT_TRUE(f.pipeline->Submit(up));
   f.At(2, [&] { f.Reply(false); f.Reply(false); }); RunLoop(f.loop);
-  EXPECT_EQ(ic.commits, (std::vector<std::string>{"é"})); ASSERT_EQ(ic.forwarded.size(), 1);
-  EXPECT_EQ(ic.releases, (std::vector<bool>{true})); EXPECT_EQ(ic.stamps, (std::vector<uint32_t>{321}));
+  EXPECT_EQ(ic.commits, (std::vector<std::string>{"é"})); EXPECT_TRUE(ic.forwarded.empty());
   EXPECT_TRUE(f.record->composing.empty()); EXPECT_TRUE(f.record->pending.empty());
+}
+TEST(InputPipelineCoreTest, ModifierOnlyReplyCannotLeaveAForwardedShiftPressed) {
+  Fixture f; fcitx::InputContextManager manager; DispatchContext ic(manager); ic.focusIn();
+  fcitx::KeyEventHandler translator; const auto watch = ic.watch();
+  f.pipeline.reset(); f.record->suspended = false;
+  f.pipeline = std::make_unique<InputPipeline>(f.loop, f.record,
+      [&](auto input, auto done) {
+        ++f.sent; EXPECT_FALSE(input.key().has_key_code());
+        EXPECT_GT(input.key().modifier_keys_size(), 0); f.complete = std::move(done); return true;
+      }, [] {}, [watch] { return watch.isValid() && watch.get()->hasFocus(); },
+      [watch](auto, auto frame) {
+        if (!watch.isValid() || !watch.get()->hasFocus()) return false;
+        if (frame) watch.get()->forwardKey(frame->raw, frame->release, frame->time);
+        return watch.isValid();
+      });
+  f.pipeline->SetTranslator([&](auto& frame) {
+    commands::KeyEvent key;
+    if (translator.GetKeyEvent(frame.raw.sym(), frame.raw.code(), frame.raw.states(),
+        config::Config::ROMAN, false, frame.release, &key)) {
+      frame.request.emplace(); frame.request->set_type(commands::Input::SEND_KEY);
+      *frame.request->mutable_key() = key;
+    }
+  });
+  for (bool release : {false, true}) {
+    fcitx::KeyEvent event(&ic, fcitx::Key(FcitxKey_Shift_L, fcitx::KeyState::Shift, 50), release, release ? 302 : 301);
+    InputFrame frame; frame.raw = event.rawKey(); frame.release = event.isRelease(); frame.time = event.time();
+    ASSERT_TRUE(f.pipeline->Submit(frame)); event.filterAndAccept();
+  }
+  f.At(2, [&] { f.Reply(true); f.Reply(true); }); RunLoop(f.loop);
+  EXPECT_EQ(f.sent, 1); EXPECT_EQ(ic.releases, (std::vector<bool>{false, true}));
+  EXPECT_EQ(ic.stamps, (std::vector<uint32_t>{301, 302}));
+  ASSERT_EQ(ic.forwarded.size(), 2); EXPECT_EQ(ic.forwarded[0], ic.forwarded[1]);
+  EXPECT_TRUE(ic.commits.empty()); EXPECT_TRUE(f.record->pending.empty());
 }
 TEST(InputPipelineCoreTest, UnconsumedCallbackSpaceCommitsExactlyOnceWithoutRawKey) {
   Fixture f; fcitx::InputContextManager manager; DispatchContext ic(manager); ic.focusIn();

@@ -11,6 +11,9 @@ auto& Records() {
   static auto* records = new std::vector<std::shared_ptr<RetainedInput>>;
   return *records;
 }
+uint64_t PhysicalKey(const InputFrame& frame) {
+  return frame.raw.code() ? (uint64_t(frame.raw.code()) << 1) | 1 : uint64_t(frame.raw.sym()) << 1;
+}
 }
 std::shared_ptr<RetainedInput> InputRetention::Reserve() {
   if (Records().size() >= 32) return {};
@@ -62,6 +65,16 @@ void InputPipeline::SetReady(bool ready) {
     active_ = true; Schedule();
   }
 }
+bool InputPipeline::ForwardRelease(const InputFrame& frame) const {
+  const auto down = forwarded_down_.find(PhysicalKey(frame));
+  return down == forwarded_down_.end() || down->second;
+}
+void InputPipeline::RecordPhysicalDelivery(const InputFrame& frame, bool raw_forwarded) {
+  if (!frame.physical) return;
+  const auto key = PhysicalKey(frame);
+  if (frame.release) forwarded_down_.erase(key);
+  else forwarded_down_[key] = forwarded_down_[key] || raw_forwarded;
+}
 void InputPipeline::Next() {
   if (!ready_) { active_ = false; return; }
   if (record_->suspended || record_->pending.empty()) { active_ = false; return; }
@@ -70,6 +83,9 @@ void InputPipeline::Next() {
   const bool eligible = valid();
   if (weak.expired() || record_->suspended) return;
   if (!eligible) { Hold("focus-or-epoch-changed"); return; }
+  const auto& physical = record_->pending.front();
+  if (physical.physical && !physical.release && forwarded_down_.size() >= 256 &&
+      !forwarded_down_.contains(PhysicalKey(physical))) { Hold("physical-key-ledger-full"); return; }
   if (!record_->pending.front().translated && translate_) {
     auto translate = translate_;
     auto translated = record_->pending.front();
@@ -83,6 +99,7 @@ void InputPipeline::Next() {
   if (compose == InputFrame::Compose::Error) { Hold("compose-invalid"); return; }
   if (compose == InputFrame::Compose::Pending) {
     if (record_->composing.size() >= 16) { Hold("compose-prefix-full"); return; }
+    RecordPhysicalDelivery(record_->pending.front(), false);
     record_->composing.push_back(std::move(record_->pending.front()));
     record_->pending.pop_front(); Schedule(); return;
   }
@@ -103,21 +120,25 @@ void InputPipeline::Next() {
     }
     ++token_; // Duplicate callbacks cannot deliver/commit twice.
     auto frame = std::move(record_->pending.front()); record_->pending.pop_front();
-    const bool forward = frame.compose != InputFrame::Compose::Cancelled &&
+    const bool forward = frame.physical && frame.release ? ForwardRelease(frame) :
+        frame.compose != InputFrame::Compose::Cancelled &&
         (frame.physical || !frame.composed_text.empty()) && (!frame.request || !output.consumed());
+    const bool raw_forwarded = forward && frame.composed_text.empty();
     record_->delivering = frame;
     record_->outcome = output;
     auto record = record_;
     auto deliver = deliver_;
-    Schedule();
-    // No member access after delivery: a frontend may destroy its IC.
+    // Do not arm the next frame while the frontend is applying this one.
+    // A delivery hook may run a nested loop, submit more keys or destroy us.
     const bool accepted = deliver(std::move(output), forward ? std::optional<InputFrame>(std::move(frame)) : std::nullopt);
-    if (!accepted && !weak.expired()) Hold("delivery-interrupted");
-    if (accepted && !record->suspended) {
-      if (record->delivering->compose == InputFrame::Compose::Complete ||
-          record->delivering->compose == InputFrame::Compose::Cancelled) record->composing.clear();
-      record->delivering.reset(); record->outcome.reset();
-    }
+    if (weak.expired()) return;
+    if (!accepted) { Hold("delivery-interrupted"); return; }
+    if (record->suspended) return;
+    RecordPhysicalDelivery(*record->delivering, raw_forwarded);
+    if (record->delivering->compose == InputFrame::Compose::Complete ||
+        record->delivering->compose == InputFrame::Compose::Cancelled) record->composing.clear();
+    record->delivering.reset(); record->outcome.reset();
+    Schedule();
   };
   if (record_->pending.front().request) {
     auto send = send_;

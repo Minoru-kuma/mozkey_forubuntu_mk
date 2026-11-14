@@ -105,7 +105,7 @@ class MozcState : public InputContextProperty {
   void ReleaseClient();
 
   bool SendCommand(const mozc::commands::SessionCommand& session_command);
-  void ShowRetained();
+  void ShowRetained(bool inspect = false);
   void Shutdown();
 
   void SetUsage(const std::string& title, const std::string& description);

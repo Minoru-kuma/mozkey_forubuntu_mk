@@ -117,6 +117,30 @@ TEST(AsyncSessionTest, DestroyInsideCompletion) {
   ASSERT_TRUE(session->Submit(KeyInput('a'), [&](bool ok, auto) { EXPECT_TRUE(ok); ++calls; session.reset(); }));
   RunLoop(loop, 100); EXPECT_EQ(calls, 1); EXPECT_EQ(session, nullptr);
 }
+TEST(AsyncSessionTest, CompletionCanEnqueueNextKeyWithoutLosingItsContinuation) {
+  fcitx::EventLoop loop; auto peer = std::make_shared<Peer>();
+  AsyncSession session(loop, {}, [peer](const auto&) { return peer->Connect(); });
+  int calls = 0;
+  ASSERT_TRUE(session.Submit(KeyInput('a'), [&](bool ok, auto) {
+    EXPECT_TRUE(ok); ++calls;
+    EXPECT_TRUE(session.Submit(KeyInput('b'), [&](bool next_ok, auto) { EXPECT_TRUE(next_ok); ++calls; }));
+  }));
+  RunLoop(loop, 150); EXPECT_EQ(calls, 2);
+  auto received = peer->Snapshot(); ASSERT_EQ(received.size(), 4);
+  EXPECT_EQ(received[2].key().key_code(), 'a'); EXPECT_EQ(received[3].key().key_code(), 'b');
+}
+TEST(AsyncSessionTest, CancellationInsideCompletionCannotRestartQueuedRequests) {
+  fcitx::EventLoop loop; auto peer = std::make_shared<Peer>();
+  AsyncSession session(loop, {}, [peer](const auto&) { return peer->Connect(); });
+  int calls = 0;
+  ASSERT_TRUE(session.Submit(KeyInput('a'), [&](bool ok, auto) {
+    EXPECT_TRUE(ok); ++calls; session.Cancel();
+    EXPECT_FALSE(session.Submit(KeyInput('c'), {}));
+  }));
+  ASSERT_TRUE(session.Submit(KeyInput('b'), [&](bool, auto) { ++calls; }));
+  RunLoop(loop, 150); EXPECT_EQ(calls, 1); EXPECT_TRUE(session.failed());
+  EXPECT_EQ(peer->Snapshot().size(), 3);
+}
 TEST(AsyncSessionTest, CancelBlockedPreparationRetainsNoUICallback) {
   fcitx::EventLoop loop;
   AsyncSession session(loop, {}, [](const auto&) { std::this_thread::sleep_for(350ms); return -1; });

@@ -173,3 +173,17 @@ composeは[Instance 5.1.19](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/
 `response_guard`は副作用前にmode/UTF-8/consumedの整合を確認する。再変換は受理・非空replacement・選択snapshot/cursor/anchor一致が必要。一般の削除もsurrounding capabilityと送信時のexact snapshot、文字単位の範囲を要求する。拒否された再変換、空replacement、overflow、capability消失は削除せず保留する。古い非物理callbackは純UIだけskipし、確定/削除/挿入の意味がある応答を黙って捨てない。focus喪失時の既知outcomeも保持する。callback Spaceのunconsumedは現在generationだけで一度だけ挿入する。
 
 15ターゲット138成功と実API fixtureはこの限定境界の証拠。実IME、表示300ms、実live500ms/約1s、全6系統成功の代替ではない。満杯時の旧新入力順序、部分適用後の完全復旧、永久I/O/異常終了、専用server起動・終了所有、実frontend検証を残し、factoryは常に拒否する。旧100/250msは引き続き参考値である。
+
+
+## 2026-11-14 継続実装：応答の直列適用・押下対応・保存形式
+
+通常の工程間停止を設けず、`6865199fa58952609aab6dd582f49ab906bab22a`から継続する。最新mainはGitHub APIで`b489fca1561bf12ff6b43205378220163d71c21c`のままと確認。factory常時拒否とEnabled=Falseを維持し、以下はロード前の製品コード・隔離fixtureでの検証とする。
+
+- **応答適用の直列化**：InputPipelineはfrontendの確定/転送hookが戻り、所有者が生存し、保留状態でないことを確認してから次のDeferを予約する。適用中の再入で別frameがdelivering/outcomeを上書きしない。AsyncSessionもapplication callback後にlifetimeと取消generationを確認して次要求を予約し、callback内のCloseが所有するDELETE_SESSION予約を上書きしない。
+- **押下/解放の対応**：同一activationの最大256種類の押下について、raw keydownをアプリへ一度でも転送したかを保持する。serverが消費したkeydownやUnicode確定に置き換えたkeydownのkeyupだけをアプリへ送らない。転送済みmodifierのkeyupはserverがmodifier単独要求を消費しても転送する。反復では一回でも転送した押下をreleaseまで保持し、hardware codeがあればkeysymの大文字/小文字の変化より優先する。対応する押下が不明なreleaseはactivation前の押下かもしれないため転送する。focus/他IMEへ合成releaseを注入しない。この規則は実Wayland/X11/各appで未検証であり、全focus遷移を解決したとの判定には使わない。
+- **保存の成功条件**：pendingだけでなくcomposing/delivering内のcompose enum、Unicode文字列、selection、requestも符号化時に検査し、復元側が拒否するsnapshotを成功扱いしない。各frame/outcomeのコピーごとに集約1MiB上限を検査する。失敗時は出力bytesと元の全入力を保持し、切詰めて成功にしない。これは保存不能時の完全保全を実現するものではない。
+- **自動警告の情報制限**：focus復帰/打鍵時は保留の存在だけを表示し、process全体の入力内容を表示しない。journal本文は明示した「Show retained input」のみ。非focus、他IME、password/sensitiveでは表示しない。実UIでの動作は未検証。
+
+再入の故障注入はSDK公開EventLoopInterfaceを実装した限定Defer schedulerを使う。導入済みsd-event backendは終了後のexec再実行を拒否するため、それを実frontendのnested-loop成功と読み替えない。他の通常キー・modifier/composeのCore fixtureは導入済みFcitx5の実EventLoop/InputContext/KeyEvent/forwardKeyを使い、Instanceや製品IME/serverは起動しない。
+
+未解決のqueue満杯時の新規キー通過、保存先停止時の終了保全、永久停止workerとruntime破棄、専用serverの起動/終了所有は引き続き実装課題であり、この変更でA5を合格扱いしない。16枠を増やすだけ、入力を捨てて消費扱いにする、古い要求を自動再送する、focus移動先へ保留入力を送る対処は採らない。

@@ -172,8 +172,8 @@ bool MozcState::ProcessKeyEvent(KeySym sym, uint32_t code, KeyStates states,
                                 bool jp, bool release, uint32_t time) {
   if (ic_->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return false;
   if (!release) CancelCallbacks();
+  if (pipeline_ && pipeline_->suspended()) { ShowRetained(); return false; }
   if (!EnsurePipeline()) return false;
-  if (pipeline_->suspended()) { ShowRetained(); return false; }
   mozc::fcitx5::InputFrame frame;
   frame.raw = Key(sym, states, code); frame.release = release; frame.time = time;
   frame.japanese_layout = jp; frame.generation = epoch_;
@@ -264,11 +264,13 @@ void MozcState::FocusOut(const InputContextEvent&) {
   if (weak.expired() || !watch.isValid()) return;
   watch.get()->updateUserInterface(UserInterfaceComponent::InputPanel);
 }
-void MozcState::ShowRetained() {
-  if (ic_->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
-  // Explicit inspection only: never replay uncertain commits/raw keys.
+void MozcState::ShowRetained(bool inspect) {
+  if (!ic_->hasFocus() || engine_->instance()->inputMethod(ic_) != "mozkey" ||
+      ic_->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+  // Automatic focus/key notices never expose input from other contexts.
+  // Only the explicit inspection action may show the process-owned journal.
   std::string text = _("Input retained; automatic delivery is suspended");
-  text += mozc::fcitx5::InputRecovery::Inspect(mozc::fcitx5::InputRetention::Snapshot());
+  if (inspect) text += mozc::fcitx5::InputRecovery::Inspect(mozc::fcitx5::InputRetention::Snapshot());
   ic_->inputPanel().setAuxUp(Text(text));
   ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
 }

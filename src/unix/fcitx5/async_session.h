@@ -37,6 +37,7 @@ class AsyncSession {
   PreparationWorker::Job prepare_;
   std::deque<Pending> queue_;
   uint64_t id_ = 0, deadline_ = 0;
+  uint64_t generation_ = 0;
   int peer_pid_ = 0;
   bool initialized_ = false, failed_ = false, active_ = false, closing_ = false;
   Stage stage_ = Stage::Create;
@@ -46,6 +47,7 @@ class AsyncSession {
   std::unique_ptr<fcitx::EventSourceTime> preparation_timer_;
   std::unique_ptr<AsyncRpc> rpc_;
   std::unique_ptr<fcitx::EventSource> continuation_;
+  std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
 };
 // Addon-owned bounded cleanup. Its teardown cancels all IO; it never retains
 // an IC, input callback or event-loop reference beyond a sealed owner.

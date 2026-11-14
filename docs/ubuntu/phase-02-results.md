@@ -876,3 +876,31 @@ factoryを外す条件は揃っていない。とくにqueue満杯で新キー�
 同じSHAの通常pushは[Lint 43541197759](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43541197759)、[Linux limited 43541197749](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43541197749)、[Zenz 43541197753](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43541197753)が全てcompleted/success。Linuxの実job logではSDK不足により実APIと製品境界がNOT EXECUTED、既存6ターゲットは成功だった。138ケースと実APIの証拠はローカル隔離環境であり、CIで同じ試験を実行したとは扱わない。フル6系統は未実行・未検証のまま。
 
 この追記は検証結果のみ。最終報告では追記HEADのpush/remote一致と、そのHEADに対応する新規staging/CI状態を確認し、上記実装SHAの成功から類推しない。
+
+
+## 2026-11-14 継続実装：入力応答・keyup・snapshotの安全性修正
+
+再開基点は`6865199fa58952609aab6dd582f49ab906bab22a`、同じ`feat/ubuntu-phase2a`を使用。最新mainをGitHub APIで再照会し`b489fca1561bf12ff6b43205378220163d71c21c`を確認。開始時の当worktreeはclean。元worktreeのステージ済み/未ステージ差分hash、Phase 1/2Aの76資産hashとcache存在を再確認し全て保持した（`P2/logs/resume-protection-20261114.json`）。
+
+### 変更と安全契約
+
+| 箇所 | 実装・検証範囲 |
+|---|---|
+| InputPipeline / AsyncSession | frontend/app callbackが戻る前に次要求を予約しない。再入中の入力追加入力、保留、所有者破棄、Cancel/Closeを区別。lifetimeと取消generationを確認し、二重予約/適用中journalの上書きを防止 |
+| 物理キー対応 | 同一activation内のraw押下転送を最大256種類保持。消費済みkeydown/compose Unicode置換の孤立keyupを抑止。転送済みmodifierのkeyupをserver consumedに関係なく転送。反復とhardware code一致、activation前の不明releaseを検証 |
+| InputRecovery | 3箇所のframeのcompose/文字列/selection/request制限をEncodeとDecodeで整合。frame/outcomeごとの集約上限確認。成功保存だがDecode不能となる経路を閉じ、失敗時は元入力と出力bytesを保持 |
+| 保留通知 | suspended判定をEnsurePipelineより先に置き、到達不能だった通知を修正。自動focus/打鍵通知は本文を含めず、全context本文の表示は明示inspectだけ。非focus/他IME/password/sensitive表示を拒否 |
+
+### 限定検証
+
+`P2/run_delivery_tests_20261114.py`初回は新しい3再入試験が`EventLoopException: Stale file handle`で失敗した。sd-event backendをexit後に再execした試験方法が原因で、成功として記録しない。SDK公開EventLoopInterfaceを用いる有界Defer schedulerの故障注入へ修正し、`P2/run_delivery_v2_20261114.py`で15ターゲット成功（34.962秒、RX上限155,849 bytes、workspace peak 6,820,241,408 bytes）。
+
+続いて押下対応を追加した`P2/run_key_ledger_20261114.py`は製品`stage_inputs`と15ターゲット全成功（68.495秒、RX上限313,399 bytes、peak 6,823,591,936 bytes）。成功151ケース、fixture子プロセス入口1件の意図したskip。前回の138成功から再入3、session2、codec3、keyup/反復/実Core modifier5を追加した。旧52ケースを含むlinux_deadline21 + client30 + ipc1の資産・成功を保持。取得禁止・jobs=2・既存repository/disk cache・隔離HOME/XDGを継続した。
+
+再入3ケースは制御scheduler上の故障注入であり、実frontendやsd-eventのnested execの成功とは扱わない。キー/keyup/modifier/composeの通常Core fixtureは実SDKを使用。実Wayland/X11、各app、localeの実XCompose、製品IME/serverの動作と表示時間は未検証。sourceの3箇所のKeyStates初期化警告を修正し、通知修正を含む最終ソースを`P2/run_input_safety_final_20261114.py`で確認した。製品buildと15ターゲット成功（46.254秒、RX上限218,745 bytes、peak 6,823,682,048 bytes）。この最終確認でテストは全て入力digestに対応したcache再利用で、新規実行とは区別する。追加ケースの実行証拠は前段のlog。既存のStandardPath deprecationは残る。
+
+今回の新規変更はLinux専用Fcitx5実装と関連文書に限定し、共通client/protocol/IPCの機能変更、依存取得、実IME/server/tool起動、Hazkey/システム変更、2B以降/main統合は行わない。新規snapshot形式versionの変更・旧snapshotの削除や自動再送も行わない。
+
+### 継続課題
+
+A1の由来・保護とA7の資源条件を維持。A2/A3/A4/A6は専用経路・build・限定fixtureの部分実施、A5は未達。queue満杯時の順序/救済、保存不能/永久I/O時の保全とruntime終了、archiveの明示的解決/容量管理、専用serverの非同期起動・終了所有は未解決。実frontend/実serverと全6系統CIも未検証。factory常時拒否・Enabled=False、2A未完了・2B移行不可を維持し、承認範囲の独立した修正・検証を継続する。

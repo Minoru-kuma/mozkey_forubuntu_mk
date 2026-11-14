@@ -7,6 +7,8 @@
 
 **再開後の実装（2026-11-13〜14）：工程間レビュー待ちを解除して継続。native thread/TLS回収、通常終了時の最終snapshot保存、compose prefix保護、非同期DELETE_SESSION、空状態でのfocus再受付、再変換/削除/古い応答のguardを製品側へ接続した。限定15ターゲット138ケース成功（fixture入口1 skip）。保存不能/永久停滞時の完全保全、満杯時の入力順序、実frontend/実server起動所有権と全6系統CIは未達・未検証であり、factory常時拒否・2A未完了・2B移行不可を維持する。未達を一律の工程レビュー停止には扱わず、安全条件と実施証拠は[結果](docs/ubuntu/phase-02-results.md)末尾へ記録する。実IME起動・導入/既存IME設定変更/システム変更/2B以降/main統合は禁止のまま。**
 
+**2026-11-14継続：応答適用後のDefer予約と取消generation、raw押下/keyup/modifier/composeの対応、snapshot Encode/Decodeの制限整合、自動保留通知の本文抑止を実装。限定15ターゲット151成功（fixture入口1 skip）。再入注入schedulerと実Core fixtureを区別する。満杯時の入力順序・保存不能時の保全・永久worker/runtime終了・server起動所有等は未達であり、factory常時拒否・2A未完了を維持し、承認済み作業を継続する。**
+
 ユーザーの最新指示でA5は入力イベントループの長時間停止防止を中心に再設計。100ms/250msは参考測定値へ変更し、Fcitx5内の非同期IPCを優先する。設計・隔離PoC・故障注入と作業ブランチへの反映を承認。新受入基準は[レビュー案](docs/ubuntu/a5-async-design.md)であり、A5合格・製品統合・次工程は承認しない。以下の旧数値目標・停止理由は履歴として保持する。
 
 2026-11-11にCI workflowと開発運用文書の実行方針変更・限定検証・作業ブランチへのcommit/pushを承認。通常pushは軽量、Phase完了・main統合前は全6系統フルCIとする（[CI運用](docs/ubuntu/ci-policy.md)）。A5未達・工程1停止と後続Phaseの未承認状態は維持する。

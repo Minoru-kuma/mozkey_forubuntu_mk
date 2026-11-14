@@ -19,6 +19,11 @@ uint64_t Checksum(std::string_view bytes) {
   for (const unsigned char byte : bytes) { hash ^= byte; hash *= 1099511628211ULL; }
   return hash;
 }
+bool ValidFrame(const InputFrame& frame) {
+  return frame.selection_snapshot.size() <= 65536 && frame.composed_text.size() <= 65536 &&
+      static_cast<unsigned>(frame.compose) <= static_cast<unsigned>(InputFrame::Compose::Error) &&
+      (!frame.request || frame.request->ByteSizeLong() <= kLimit);
+}
 void FrameToProto(const InputFrame& frame, recovery::Frame* saved) {
   saved->set_surrounding_valid(frame.surrounding_valid);
   saved->set_symbol(frame.raw.sym()); saved->set_code(frame.raw.code());
@@ -49,20 +54,33 @@ bool FrameFromProto(const recovery::Frame& saved, InputFrame* frame) {
 bool InputRecovery::Encode(const Records& records, std::string* bytes) {
   if (!bytes || records.size() > 32) return false;
   recovery::Snapshot snapshot; snapshot.set_version(1);
+  const auto fits = [&] { return snapshot.ByteSizeLong() <= kLimit - kMagic.size() - 8; };
   for (const auto& record : records) {
     if (!record || record->pending.size() > 16 || record->composing.size() > 16 || record->preedit.size() > 65536 ||
         record->reason.size() > 1024) return false;
     auto* saved = snapshot.add_records();
     for (const auto& frame : record->pending) {
-      if (frame.selection_snapshot.size() > 65536 ||
-          (frame.request && frame.request->ByteSizeLong() > kLimit)) return false;
+      if (!ValidFrame(frame)) return false;
       FrameToProto(frame, saved->add_pending());
+      if (!fits()) return false;
     }
-    for (const auto& frame : record->composing) FrameToProto(frame, saved->add_composing());
-    if (record->delivering) FrameToProto(*record->delivering, saved->mutable_delivering());
-    if (record->outcome) *saved->mutable_outcome() = *record->outcome;
+    for (const auto& frame : record->composing) {
+      if (!ValidFrame(frame)) return false;
+      FrameToProto(frame, saved->add_composing());
+      if (!fits()) return false;
+    }
+    if (record->delivering) {
+      if (!ValidFrame(*record->delivering)) return false;
+      FrameToProto(*record->delivering, saved->mutable_delivering());
+      if (!fits()) return false;
+    }
+    if (record->outcome) {
+      if (record->outcome->ByteSizeLong() > kLimit) return false;
+      *saved->mutable_outcome() = *record->outcome;
+      if (!fits()) return false;
+    }
     saved->set_preedit(record->preedit); saved->set_reason(record->reason);
-    if (snapshot.ByteSizeLong() > kLimit - kMagic.size() - 8) return false;
+    if (!fits()) return false;
   }
   std::string payload;
   if (!snapshot.SerializeToString(&payload)) return false;

@@ -77,6 +77,50 @@ TEST(InputRecoveryTest, InspectionIsBoundedValidUtf8AndKeepsOriginalData) {
   EXPECT_LE(text.size(), 128); EXPECT_TRUE(fcitx::utf8::validate(text)); EXPECT_EQ(record->preedit, original);
   EXPECT_TRUE(InputRecovery::Inspect({record}, 0).empty());
 }
+TEST(InputRecoveryTest, EncoderCannotReportSuccessForUnreadableFrameFields) {
+  // Cover every location: pending, compose prefix and uncertain delivery.
+  for (int location = 0; location < 3; ++location) {
+    for (int invalid = 0; invalid < 4; ++invalid) {
+      auto record = std::make_shared<RetainedInput>();
+      InputFrame frame;
+      if (invalid == 0) frame.composed_text.assign(65537, 'x');
+      if (invalid == 1) frame.selection_snapshot.assign(65537, 'x');
+      if (invalid == 2) frame.compose = static_cast<InputFrame::Compose>(999);
+      if (invalid == 3) {
+        frame.request.emplace(); frame.request->set_type(commands::Input::SEND_KEY);
+        frame.request->mutable_key()->set_key_string(std::string(1024*1024, 'x'));
+      }
+      if (location == 0) record->pending.push_back(frame);
+      if (location == 1) record->composing.push_back(frame);
+      if (location == 2) record->delivering = frame;
+      std::string bytes = "prior-snapshot";
+      EXPECT_FALSE(InputRecovery::Encode({record}, &bytes)) << location << ':' << invalid;
+      EXPECT_EQ(bytes, "prior-snapshot");
+      EXPECT_EQ(record->pending.size() + record->composing.size() + bool(record->delivering), 1);
+    }
+  }
+}
+TEST(InputRecoveryTest, MaximumAllowedFieldsRoundTripInEveryFrameLocation) {
+  auto record = std::make_shared<RetainedInput>();
+  InputFrame frame; frame.composed_text.assign(65536, 'x'); frame.selection_snapshot.assign(65536, 'y');
+  frame.compose = InputFrame::Compose::Complete;
+  record->pending.push_back(frame); record->composing.push_back(frame); record->delivering = frame;
+  std::string bytes; ASSERT_TRUE(InputRecovery::Encode({record}, &bytes));
+  InputRecovery::Records restored; ASSERT_TRUE(InputRecovery::Decode(bytes, &restored));
+  ASSERT_EQ(restored.size(), 1);
+  EXPECT_EQ(restored[0]->pending[0].composed_text, frame.composed_text);
+  EXPECT_EQ(restored[0]->composing[0].selection_snapshot, frame.selection_snapshot);
+  ASSERT_TRUE(restored[0]->delivering);
+  EXPECT_EQ(restored[0]->delivering->composed_text, frame.composed_text);
+}
+TEST(InputRecoveryTest, AggregateLimitFailsWithoutTruncatingOrReplacingInput) {
+  auto record = std::make_shared<RetainedInput>();
+  InputFrame frame; frame.selection_snapshot.assign(65536, 'x');
+  record->pending.assign(16, frame);
+  std::string bytes = "prior-snapshot";
+  EXPECT_FALSE(InputRecovery::Encode({record}, &bytes)); EXPECT_EQ(bytes, "prior-snapshot");
+  EXPECT_EQ(record->pending.size(), 16); EXPECT_EQ(record->pending.back().selection_snapshot, frame.selection_snapshot);
+}
 struct RecoveryFileTest : ::testing::Test {
   std::string root;
   fcitx::EventLoop loop;

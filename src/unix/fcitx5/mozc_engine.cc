@@ -181,7 +181,7 @@ MozcEngine::MozcEngine(Instance* instance)
   instance_->userInterfaceManager().registerAction("mozkey-retained-input", &recoveryAction_);
   recoveryAction_.setShortText(_("Show retained input"));
   recoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) {
-    if (instance_->inputMethod(ic) == "mozkey") mozcState(ic)->ShowRetained();
+    if (ic && instance_->inputMethod(ic) == "mozkey") mozcState(ic)->ShowRetained(true);
   });
   toolMenu_.addAction(&recoveryAction_);
   instance_->userInterfaceManager().registerAction("mozkey-save-retained-input", &saveRecoveryAction_);
