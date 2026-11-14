@@ -1,6 +1,6 @@
 # Ubuntu開発のCI運用
 
-2026-11-13更新。AGENTS.mdとPLANS.mdに従い、通常pushは軽量、Phase完了・main統合前はフルCIとする。2Aの再開/実装範囲は最新ユーザー指示とPLANS.mdに従い、CI成功だけでA5を合格扱いしない。
+2026-11-14更新。AGENTS.mdとPLANS.mdに従い、通常pushは軽量、Phase完了・main統合前はフルCIとする。2Aの再開/実装範囲は最新ユーザー指示とPLANS.mdに従い、CI成功だけでA5を合格扱いしない。
 
 ## 実行条件
 
@@ -20,7 +20,7 @@
 
 Fcitx5 5.1.19以上の開発ファイルが既にあるrunnerでは`run_fcitx5_api_probe.py`で独立C++ API試験を実行する。ない場合は未実行をnotice/summaryへ明記し、apt等で導入しない。stepの成功を実API検証成功へ読み替えず、ログのPASSを確認する。
 
-同じ開発ファイルがある場合、src変更時には専用設定ONのsystem_util/ipc_path_managerとcallback_queue/connection_preparation/frontend_boundary/async_session/input_pipeline/async_configの限定試験も実行する。辞書・package・実IMEは不要。Ubuntu 24.04で未導入ならNOT EXECUTEDを明記する。新規Fcitx製品targetはmanual/opt-inとし、既定の全OSビルドへSDK依存を強制しない。通常の6ターゲットは設定OFFを保つ。cacheの入力hash変更時は同一OS/archの旧cacheも復元候補にし、Bazel側の入力/action digestで再利用を判定する。依存の版・チェックサム検証は変更しない。
+同じ開発ファイルがある場合、src変更時には専用設定ONのsystem_util/ipc_path_managerとcallback_queue/connection_preparation/frontend_boundary/async_session/input_pipeline/async_config/input_recovery/frame_translator/response_guardの限定試験も実行する。辞書・package・実IMEは不要。Ubuntu 24.04で未導入ならNOT EXECUTEDを明記する。新規Fcitx製品targetはmanual/opt-inとし、既定の全OSビルドへSDK依存を強制しない。通常の6ターゲットは設定OFFを保つ。cacheの入力hash変更時は同一OS/archの旧cacheも復元候補にし、Bazel側の入力/action digestで再利用を判定する。依存の版・チェックサム検証は変更しない。
 
 非同期IPCのモデルPoC `tests/ubuntu/test_async_ipc_poc.py`も毎回実行する。旧helper PoCの数値アサートはその診断資産として維持するが、A5の判定は[現行の設計・受入条件](a5-async-design.md)に従い、未達/未検証を合格扱いしない。
 

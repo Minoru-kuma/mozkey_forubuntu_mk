@@ -7,14 +7,25 @@
 #include <optional>
 #include <string>
 namespace mozc::fcitx5 {
-// Reads/writes only conf/mozkey.conf under an explicit cached Fcitx config
-// root. All filesystem operations run on the owned preparation worker.
+// Defaults to conf/mozkey.conf under an explicit cached Fcitx config root.
+// Private snapshot options use only validated single-component names. All
+// filesystem operations run on the owned preparation worker.
 class AsyncConfigFile {
  public:
   using Done = std::function<void(bool, std::string)>;
+  struct Options {
+    std::string directory = "conf", filename = "mozkey.conf";
+    size_t limit = 65536;
+    bool durable = false, private_directory = false, no_replace = false;
+  };
   AsyncConfigFile(fcitx::EventLoop& loop, std::string root,
                   std::optional<std::string> save, Done done);
+  AsyncConfigFile(fcitx::EventLoop& loop, std::string root,
+                  std::optional<std::string> save, Done done, Options options);
   ~AsyncConfigFile();
+  // Worker-only shared operation for the bounded final shutdown task.
+  static bool TransferForWorker(const std::string& root, const std::optional<std::string>& save,
+                               const std::atomic<bool>& cancelled, std::string& text, const Options& options);
  private:
   struct Data { std::string text; bool ok = false; };
   void Start();
@@ -23,6 +34,7 @@ class AsyncConfigFile {
   std::string root_;
   std::optional<std::string> save_;
   Done done_;
+  Options options_;
   uint64_t deadline_;
   std::shared_ptr<Data> data_ = std::make_shared<Data>();
   std::unique_ptr<PreparationWorker> worker_;

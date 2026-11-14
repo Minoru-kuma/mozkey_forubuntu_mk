@@ -9,6 +9,7 @@
 #include <string_view>
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
+namespace mozc::fcitx5 { class SessionCloseQueue; }
 namespace fcitx {
 class MozcClientInterface {
  public:
@@ -26,6 +27,6 @@ class MozcClientInterface {
   virtual bool LaunchTool(const std::string&, std::string_view) { return false; }
   virtual bool LaunchToolWithProtoBuf(const mozc::commands::Output&) { return false; }
 };
-std::unique_ptr<MozcClientInterface> createClient(EventLoop& loop);
+std::unique_ptr<MozcClientInterface> createClient(EventLoop& loop, std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup = {});
 }
 #endif

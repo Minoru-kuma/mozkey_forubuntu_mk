@@ -10,18 +10,21 @@
 
 namespace mozc::fcitx5 {
 struct InputFrame {
+  enum class Compose { None, Pending, Complete, Cancelled, Error } compose = Compose::None;
+  std::string composed_text;
   fcitx::Key raw;
   bool release = false;
   uint32_t time = 0;
   std::optional<commands::Input> request;
   bool physical = true, translated = false, japanese_layout = false;
   uint64_t generation = 0;
+  bool surrounding_valid = false;
   std::string selection_snapshot;
   unsigned cursor = 0, anchor = 0;
   int32_t selected_length = 0;
 };
 struct RetainedInput {
-  std::deque<InputFrame> pending;
+  std::deque<InputFrame> pending, composing;
   std::string preedit, reason;
   std::optional<InputFrame> delivering;
   std::optional<commands::Output> outcome;

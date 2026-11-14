@@ -133,6 +133,8 @@ class MozcEngine final : public InputMethodEngineV2 {
   void compositionModeUpdated(InputContext* ic);
 
   void SyncData(bool force);
+  void SaveRetained(InputContext* ic);
+  void ReadSavedRetained(InputContext* ic);
 
   bool deactivating() const { return deactivating_; }
   auto* parser() const { return parser_.get(); }
@@ -145,22 +147,25 @@ class MozcEngine final : public InputMethodEngineV2 {
   std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
   Instance* instance_;
   const std::unique_ptr<MozcResponseParser> parser_;
+  std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup_;
   std::unique_ptr<MozcClientInterface> client_;
   std::unique_ptr<MozcClientPool> pool_;
   std::unordered_set<MozcState*> states_;
   FactoryFor<MozcState> factory_;
   std::unique_ptr<EventSource> exitHandle_;
   std::unique_ptr<mozc::fcitx5::AsyncConfigFile> configIo_;
+  std::unique_ptr<mozc::fcitx5::AsyncConfigFile> recoveryIo_;
   SimpleAction toolAction_;
   std::vector<std::unique_ptr<MozcModeSubAction>> modeActions_;
   std::unique_ptr<HandlerTableEntry<EventHandler>> globalConfigReloadHandle_;
 
   SimpleAction configToolAction_, dictionaryToolAction_, addWordAction_,
       aboutAction_;
-  SimpleAction separatorAction_, recoveryAction_;
+  SimpleAction separatorAction_, recoveryAction_, saveRecoveryAction_, readRecoveryAction_;
   Menu toolMenu_;
   MozcEngineConfig config_;
   bool deactivating_ = false;
+  bool shutdownJoined_ = false, shutdownSnapshotDurable_ = false;
 
 
 };

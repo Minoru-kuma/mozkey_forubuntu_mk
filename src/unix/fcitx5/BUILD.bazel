@@ -1,3 +1,5 @@
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load(
     "//:build_defs.bzl",
     "mozc_cc_binary",
@@ -102,10 +104,13 @@ mozc_cc_library(
         ":async_config",
         ":callback_queue",
         ":fcitx_key_util",
+        ":frame_translator",
         ":i18nwrapper",
         ":input_pipeline",
+        ":input_recovery",
         ":mozc_client_pool",
         ":mozc_ipc_client",
+        ":response_guard",
         ":surrounding_text_util",
         "//base:port",
         "//base:run_level",
@@ -352,6 +357,7 @@ mozc_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":fcitx_key_util",
         ":input_pipeline",
         "//testing:gunit_main",
     ],
@@ -382,6 +388,109 @@ mozc_cc_test(
     }),
     deps = [
         ":async_config",
+        "//testing:gunit_main",
+    ],
+)
+
+proto_library(
+    name = "input_recovery_proto",
+    srcs = ["input_recovery.proto"],
+    tags = ["manual"],
+    deps = ["//protocol:commands_proto"],
+)
+
+cc_proto_library(
+    name = "input_recovery_cc_proto",
+    tags = ["manual"],
+    deps = [":input_recovery_proto"],
+)
+
+mozc_cc_library(
+    name = "input_recovery",
+    srcs = ["input_recovery.cc"],
+    hdrs = ["input_recovery.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":async_config",
+        ":input_pipeline",
+        ":input_recovery_cc_proto",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_test(
+    name = "input_recovery_test",
+    srcs = ["input_recovery_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":input_recovery",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
+    name = "frame_translator",
+    srcs = ["frame_translator.cc"],
+    hdrs = ["frame_translator.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":fcitx_key_util",
+        ":input_pipeline",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_test(
+    name = "frame_translator_test",
+    srcs = ["frame_translator_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":frame_translator",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
+    name = "response_guard",
+    srcs = ["response_guard.cc"],
+    hdrs = ["response_guard.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":input_pipeline",
+        "@fcitx5",
+    ],
+)
+
+mozc_cc_test(
+    name = "response_guard_test",
+    srcs = ["response_guard_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":response_guard",
         "//testing:gunit_main",
     ],
 )

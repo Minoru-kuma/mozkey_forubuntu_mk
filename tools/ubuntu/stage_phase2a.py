@@ -75,7 +75,7 @@ def stage(checkout, binary_root, output):
             checkout / f'src/data/images/{source}.svg')
     # Retain the frontend source and build inputs for review and relinking.
     for path in frontend.iterdir():
-        if path.suffix in {'.cc', '.h', '.bazel', '.map'}:
+        if path.suffix in {'.cc', '.h', '.proto', '.bazel', '.map'}:
             mappings['usr/share/doc/mozkey/frontend-source/' + path.name] = path
     for source in mappings.values():
         if not source.is_file():

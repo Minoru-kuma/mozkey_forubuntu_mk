@@ -8,12 +8,25 @@ The frontend now uses IO/Timer/Defer-driven RPC and a per-context asynchronous
 session. Profile/key/peer and dedicated configuration I/O run on the single
 owned preparation worker. Physical keys are recorded before consumption;
 late/failing replies suspend delivery and retain input in process memory.
-This is still **not input-safe enough to activate**: process-exit recovery,
-actual frontend key release/repetition, session cleanup/server startup and
-worker/runtime shutdown remain unverified. The recovery menu only inspects
-retained data; it does not replay uncertain effects. Server-response launches,
-GUI tool menu launching and clipboard fallback are unavailable. See the current
-results in `docs/ubuntu/phase-02-results.md` and `a5-async-design.md`.
+This is still **not input-safe enough to activate**. Bounded normal shutdown now
+seals admission, attempts a durable inspection snapshot and joins the native
+worker including TLS destruction. A timeout is a failure, never proof of cleanup.
+Compose prefixes and validated late responses are retained. Per-context clients
+retire known sessions through an addon-owned DELETE_SESSION queue; owner teardown
+cancels that queue without waiting. Empty contexts can prepare a fresh session on
+focus return. Rejected reconversion never deletes the selection; deletions require
+an exact surrounding snapshot and frontend capability.
+
+Private snapshots are bounded to 1MiB, stored in `mozkey-recovery/` under the
+Fcitx PkgConfig directory (directory 0700, files 0600). They contain input/context
+in plaintext and are **not logs or encrypted storage**. Unique snapshots are never
+overwritten. A separate `latest` pointer supports explicit inspection after
+restart. Inspection never replays requests, keys or uncertain commits. A full
+archive browser, explicit resolution and bounded retention policy remain pending.
+Filesystem failure, shutdown budget expiry and snapshot-size refusal preserve
+memory while alive but do not guarantee process-exit recovery; activation remains
+blocked. Real frontend/IME/server startup and all six full CI suites are unverified.
+See `docs/ubuntu/phase-02-results.md` and `a5-async-design.md`.
 
 Build explicitly from `src/`, using the existing Phase 1 toolchain/cache and
 an isolated build HOME/XDG environment as recorded in the Phase 2 results:
@@ -25,6 +38,8 @@ bazelisk test //unix/fcitx5:callback_queue_test \
   //unix/fcitx5:connection_preparation_test \
   //unix/fcitx5:frontend_boundary_test //unix/fcitx5:async_session_test \
   //unix/fcitx5:input_pipeline_test //unix/fcitx5:async_config_test \
+  //unix/fcitx5:input_recovery_test //unix/fcitx5:frame_translator_test \
+  //unix/fcitx5:response_guard_test \
   --//:linux_mozkey=true --config=release_build --jobs=2
 ```
 

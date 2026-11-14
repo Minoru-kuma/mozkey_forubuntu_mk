@@ -45,8 +45,9 @@
 
 namespace fcitx {
 
-MozcClientPool::MozcClientPool(PropertyPropagatePolicy initialPolicy, EventLoop& loop)
-    : policy_(initialPolicy), loop_(loop) {}
+MozcClientPool::MozcClientPool(PropertyPropagatePolicy initialPolicy, EventLoop& loop,
+    std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup)
+    : policy_(initialPolicy), loop_(loop), cleanup_(std::move(cleanup)) {}
 
 void MozcClientPool::setPolicy(PropertyPropagatePolicy policy) {
   if (policy_ == policy) {
@@ -90,7 +91,7 @@ std::shared_ptr<MozcClientInterface> MozcClientPool::requestClient(
   if (iter != clients_.end()) {
     return iter->second.lock();
   }
-  std::unique_ptr<MozcClientInterface> newclient = createClient(loop_);
+  std::unique_ptr<MozcClientInterface> newclient = createClient(loop_, cleanup_);
   // Currently client capability is fixed.
   mozc::commands::Capability capability;
   capability.set_text_deletion(

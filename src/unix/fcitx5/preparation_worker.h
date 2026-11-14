@@ -14,8 +14,9 @@ namespace mozc::fcitx5 {
 // Linux Fcitx's DefaultHint/PreventUnloadHint must pin this module's code.
 // Cancellation is logical: a blocked syscall is not pthread_cancel'ed.
 // The process root retains a blocked job and refuses new jobs across reloads.
-// At process exit the kernel reclaims it; there is no static destructor/join.
-// This candidate is not yet connected to the product's client/launcher.
+// Normal process shutdown seals and tryjoins within a bounded budget. A false
+// result means the blocked job/TLS has NOT been reclaimed; runtime shutdown
+// safety is not established. No static destructor or unbounded join is used.
 class PreparationWorker {
  public:
   // Return a freshly owned validated FD, or -1. No UI callbacks on the worker.
@@ -30,9 +31,13 @@ class PreparationWorker {
   int TakeFd();  // Caller owns the result; still check IC/epoch before applying.
   void Cancel();  // Never waits; idempotent, also closes an unclaimed result.
   static bool Busy();
+  // Actual process shutdown only. Seal admission and own ONE final value-only
+  // job after any in-flight job. No UI/IC/loop capture; no new helper/thread pool.
+  static bool SetFinalJob(Job job);
   // Only for actual process termination, never focus/switch/addon unload.
   // Uses at most 390ms of a requested 400ms, reserving 10ms for unwinding.
-  // A false result leaves ownership at the process root; never joins a syscall.
+  // True means the native thread, including TLS destructors, was joined.
+  // False leaves ownership at the process root; never waits beyond the budget.
   static bool WaitForProcessExit(std::chrono::milliseconds budget);
 
  private:

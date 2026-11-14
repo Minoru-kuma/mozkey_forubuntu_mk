@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <chrono>
 #include <utility>
+#include <algorithm>
 #include "base/system_util.h"
 
 namespace mozc::fcitx5 {
@@ -24,12 +25,22 @@ AsyncSession::AsyncSession(fcitx::EventLoop& loop, LinuxDeadlineEndpoint endpoin
 }
 AsyncSession::~AsyncSession() { Cancel(); }
 void AsyncSession::Cancel() {
-  failed_ = true; ++id_;
+  failed_ = true; id_ = 0;
   continuation_.reset(); notification_.reset(); preparation_timer_.reset();
   rpc_.reset(); worker_.reset(); queue_.clear();
 }
+bool AsyncSession::Close(Done done) {
+  if (!id_ || closing_) return false;
+  const auto id = id_; Cancel();
+  id_ = id; initialized_ = true; failed_ = false; closing_ = true;
+  deadline_ = 0; active_ = true;
+  commands::Input input; input.set_type(commands::Input::DELETE_SESSION);
+  queue_.push_back({std::move(input), std::move(done)});
+  continuation_ = loop_.addDeferEvent([this](fcitx::EventSource*) { Next(); return true; });
+  continuation_->setOneShot(); return true;
+}
 bool AsyncSession::Submit(commands::Input input, Done done) {
-  if (failed_ || queue_.size() >= 16 || input.ByteSizeLong() > 1024 * 1024) return false;
+  if (failed_ || closing_ || queue_.size() >= 16 || input.ByteSizeLong() > 1024 * 1024) return false;
   queue_.push_back({std::move(input), std::move(done)});
   if (!active_) {
     active_ = true;
@@ -108,6 +119,11 @@ void AsyncSession::Received(AsyncRpc::Status status, std::string data) {
   else {
     auto callback = std::move(queue_.front().done); queue_.pop_front();
     deadline_ = 0;
+    if (closing_) {
+      id_ = 0; failed_ = true; active_ = false;
+      if (callback) callback(true, std::move(output));
+      return;
+    }
     // Defer the next RPC before the callback; the callback may delete us.
     continuation_ = loop_.addDeferEvent([this](fcitx::EventSource*) { Next(); return true; });
     continuation_->setOneShot();
@@ -129,5 +145,27 @@ void AsyncSession::Fail() {
     return true;
   });
   continuation_->setOneShot();
+}
+void SessionCloseQueue::Retire(std::shared_ptr<AsyncSession> session) {
+  if (!session) return;
+  if (sealed_ || sessions_.size() >= 32) { session->Cancel(); return; }
+  auto weak = weak_from_this();
+  if (weak.expired()) { session->Cancel(); return; }
+  auto* identity = session.get();
+  sessions_.push_back(session);
+  if (!session->Close([weak, identity](bool, auto) {
+        if (auto owner = weak.lock()) {
+          auto& entries = owner->sessions_;
+          entries.erase(std::remove_if(entries.begin(), entries.end(),
+              [identity](const auto& entry) { return entry.get() == identity; }), entries.end());
+        }
+      })) {
+    session->Cancel(); sessions_.pop_back();
+  }
+}
+void SessionCloseQueue::Cancel() {
+  sealed_ = true;
+  for (auto& session : sessions_) session->Cancel();
+  sessions_.clear();
 }
 }  // namespace mozc::fcitx5

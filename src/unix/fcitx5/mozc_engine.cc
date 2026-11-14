@@ -25,6 +25,7 @@
 #include <fcitx-utils/macros.h>
 #include <fcitx-utils/semver.h>
 #include <fcitx-utils/stringutils.h>
+#include <unistd.h>
 #include <fcitx/action.h>
 #include <fcitx/addoninstance.h>
 #include <fcitx/event.h>
@@ -37,6 +38,7 @@
 #include <fcitx/userinterfacemanager.h>
 
 #include <cstddef>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <sstream>
@@ -49,6 +51,7 @@
 #include "unix/fcitx5/mozc_client_pool.h"
 #include "unix/fcitx5/mozc_response_parser.h"
 #include "unix/fcitx5/mozc_state.h"
+#include "unix/fcitx5/input_recovery.h"
 
 namespace fcitx {
 
@@ -134,9 +137,10 @@ static_assert(mozc::commands::NUM_OF_COMPOSITIONS == kNumCompositionModes,
 MozcEngine::MozcEngine(Instance* instance)
     : instance_(instance),
       parser_(std::make_unique<MozcResponseParser>(this)),
-      client_(createClient(instance->eventLoop())),
+      cleanup_(std::make_shared<mozc::fcitx5::SessionCloseQueue>()),
+      client_(createClient(instance->eventLoop(), cleanup_)),
       factory_([this](InputContext& ic) { return new MozcState(&ic, this); }) {
-  pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy(), instance->eventLoop());
+  pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy(), instance->eventLoop(), cleanup_);
   for (auto command :
        {mozc::commands::DIRECT, mozc::commands::HIRAGANA,
         mozc::commands::FULL_KATAKANA, mozc::commands::FULL_ASCII,
@@ -180,6 +184,14 @@ MozcEngine::MozcEngine(Instance* instance)
     if (instance_->inputMethod(ic) == "mozkey") mozcState(ic)->ShowRetained();
   });
   toolMenu_.addAction(&recoveryAction_);
+  instance_->userInterfaceManager().registerAction("mozkey-save-retained-input", &saveRecoveryAction_);
+  saveRecoveryAction_.setShortText(_("Save retained input snapshot"));
+  saveRecoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) { SaveRetained(ic); });
+  toolMenu_.addAction(&saveRecoveryAction_);
+  instance_->userInterfaceManager().registerAction("mozkey-read-retained-input", &readRecoveryAction_);
+  readRecoveryAction_.setShortText(_("Inspect saved input snapshot"));
+  readRecoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) { ReadSavedRetained(ic); });
+  toolMenu_.addAction(&readRecoveryAction_);
   toolAction_.setMenu(&toolMenu_);
 
   globalConfigReloadHandle_ =
@@ -190,10 +202,26 @@ MozcEngine::MozcEngine(Instance* instance)
                             });
 
   exitHandle_ = instance_->eventLoop().addExitEvent([this](EventSource*) {
-    configIo_.reset();
+    const auto exitBegin = std::chrono::steady_clock::now();
+    configIo_.reset(); recoveryIo_.reset();
     for (auto* state : states_) state->Shutdown();
     if (client_) client_->Cancel();
-    mozc::fcitx5::PreparationWorker::WaitForProcessExit(std::chrono::milliseconds(400));
+    cleanup_->Cancel();
+    auto records = mozc::fcitx5::InputRetention::Snapshot();
+    records.erase(std::remove_if(records.begin(), records.end(), [](const auto& record) {
+      return record->pending.empty() && record->composing.empty() && record->preedit.empty() &&
+          !record->delivering && !record->outcome;
+    }), records.end());
+    std::shared_ptr<mozc::fcitx5::InputRecovery::ExitSave> snapshot;
+    if (!records.empty()) {
+      snapshot = mozc::fcitx5::InputRecovery::QueueForExit(
+          StandardPath::global().userDirectory(StandardPath::Type::PkgConfig),
+          "held-" + std::to_string(getpid()) + "-" + std::to_string(now(CLOCK_MONOTONIC)) + ".snapshot", records);
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now()-exitBegin);
+    shutdownJoined_ = mozc::fcitx5::PreparationWorker::WaitForProcessExit(std::chrono::milliseconds(390)-elapsed);
+    shutdownSnapshotDurable_ = !snapshot || (snapshot->queued && snapshot->durable.load());
     return true;
   });
   reloadConfig();
@@ -201,10 +229,11 @@ MozcEngine::MozcEngine(Instance* instance)
 
 MozcEngine::~MozcEngine() {
   lifetime_.reset();
-  configIo_.reset();
+  configIo_.reset(); recoveryIo_.reset();
   exitHandle_.reset();
   for (auto* state : states_) state->Shutdown();
   if (client_) client_->Cancel();
+  cleanup_->Cancel();
 }
 
 void MozcEngine::setConfig(const RawConfig& config) {
@@ -329,4 +358,82 @@ PropertyPropagatePolicy MozcEngine::GetSharedStatePolicy() {
   return PropertyPropagatePolicy::No;
 }
 
+}  // namespace fcitx
+
+namespace fcitx {
+namespace {
+auto SnapshotIndexOptions() {
+  auto options = mozc::fcitx5::InputRecovery::FileOptions("held-index.snapshot");
+  options.filename = "latest"; options.limit = 100; options.no_replace = false;
+  return options;
+}
+}
+void MozcEngine::SaveRetained(InputContext* ic) {
+  if (!ic || !ic->hasFocus() || instance_->inputMethod(ic) != "mozkey" ||
+      ic->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+  const auto weak = lifetime(); const auto watch = ic->watch();
+  const auto eligible = mozcState(ic)->DeliveryValid();
+  auto show = [this, weak, watch, eligible](std::string text) {
+    if (!eligible() || weak.expired() || !watch.isValid() || !watch.get()->hasFocus() ||
+        instance_->inputMethod(watch.get()) != "mozkey" ||
+        watch.get()->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+    watch.get()->inputPanel().setAuxUp(Text(std::move(text)));
+    watch.get()->updateUserInterface(UserInterfaceComponent::InputPanel);
+  };
+  auto records = mozc::fcitx5::InputRetention::Snapshot();
+  records.erase(std::remove_if(records.begin(), records.end(), [](const auto& record) {
+    return record->pending.empty() && record->composing.empty() && record->preedit.empty() &&
+        !record->delivering && !record->outcome;
+  }), records.end());
+  if (records.empty()) { show(_("No retained input to save")); return; }
+  std::string bytes;
+  if (!mozc::fcitx5::InputRecovery::Encode(records, &bytes)) {
+    show(_("Input snapshot could not be saved; retained input remains in memory")); return;
+  }
+  // A new name plus RENAME_NOREPLACE preserves all previous snapshots.
+  const auto filename = "held-" + std::to_string(getpid()) + "-" +
+      std::to_string(now(CLOCK_MONOTONIC)) + ".snapshot";
+  const auto root = StandardPath::global().userDirectory(StandardPath::Type::PkgConfig);
+  recoveryIo_.reset();
+  recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, bytes,
+      [this, weak, root, filename, show](bool ok, auto) {
+        if (weak.expired()) return;
+        if (!ok) { show(_("Input snapshot could not be saved; retained input remains in memory")); return; }
+        recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, filename,
+            [show](bool indexed, auto) { show(indexed ? _("Input snapshot saved; automatic replay is disabled") :
+                _("Input snapshot saved; the saved input list could not be updated")); }, SnapshotIndexOptions());
+      }, mozc::fcitx5::InputRecovery::FileOptions(filename));
+}
+void MozcEngine::ReadSavedRetained(InputContext* ic) {
+  if (!ic || !ic->hasFocus() || instance_->inputMethod(ic) != "mozkey" ||
+      ic->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+  const auto weak = lifetime(); const auto watch = ic->watch();
+  const auto eligible = mozcState(ic)->DeliveryValid();
+  auto show = [this, weak, watch, eligible](std::string text) {
+    if (!eligible() || weak.expired() || !watch.isValid() || !watch.get()->hasFocus() ||
+        instance_->inputMethod(watch.get()) != "mozkey" ||
+        watch.get()->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+    watch.get()->inputPanel().setAuxUp(Text(std::move(text)));
+    watch.get()->updateUserInterface(UserInterfaceComponent::InputPanel);
+  };
+  const auto root = StandardPath::global().userDirectory(StandardPath::Type::PkgConfig);
+  recoveryIo_.reset();
+  recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, std::nullopt,
+      [this, weak, root, show](bool ok, auto filename) {
+        if (weak.expired()) return;
+        if (!ok || !mozc::fcitx5::InputRecovery::ValidFilename(filename)) {
+          show(_("No readable input snapshot is available")); return;
+        }
+        recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, std::nullopt,
+            [show](bool read, auto bytes) {
+              mozc::fcitx5::InputRecovery::Records records;
+              if (!read || !mozc::fcitx5::InputRecovery::Decode(bytes, &records)) {
+                show(_("Input snapshot is unreadable; the saved file was preserved")); return;
+              }
+              std::string text = _("Saved input for inspection only; delivery outcome may be uncertain");
+              text += mozc::fcitx5::InputRecovery::Inspect(records);
+              show(std::move(text));
+            }, mozc::fcitx5::InputRecovery::FileOptions(filename));
+      }, SnapshotIndexOptions());
+}
 }  // namespace fcitx

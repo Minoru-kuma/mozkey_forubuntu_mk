@@ -35,6 +35,7 @@ class Peer {
       if (input.ParseFromString(data)) {
         { std::lock_guard lock(mutex); received.push_back(input); }
         if (input.type() == commands::Input::SEND_KEY) std::this_thread::sleep_for(delay);
+        if (input.type() == commands::Input::DELETE_SESSION) std::this_thread::sleep_for(delete_delay);
         if (!silent) {
           commands::Output out;
           out.set_id(wrong_id && input.type() == commands::Input::SEND_KEY ? 999 : 77);
@@ -54,7 +55,7 @@ class Peer {
     return sockets[0];
   }
   std::vector<commands::Input> Snapshot() { std::lock_guard lock(mutex); return received; }
-  std::chrono::milliseconds delay{0};
+  std::chrono::milliseconds delay{0}, delete_delay{0};
   bool wrong_id = false, silent = false;
  private:
   std::mutex mutex;
@@ -124,6 +125,62 @@ TEST(AsyncSessionTest, CancelBlockedPreparationRetainsNoUICallback) {
   auto cancel = loop.addTimeEvent(CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC)+10000, 1,
       [&](fcitx::EventSourceTime*, uint64_t) { session.Cancel(); return true; });
   cancel->setOneShot(); RunLoop(loop, 400); EXPECT_EQ(calls, 0);
+}
+TEST(AsyncSessionTest, CloseSendsOnlyDeleteForKnownSessionAndSealsApplicationRequests) {
+  fcitx::EventLoop loop; auto peer = std::make_shared<Peer>();
+  auto session = std::make_shared<AsyncSession>(loop, LinuxDeadlineEndpoint{}, [peer](const auto&) { return peer->Connect(); });
+  int application = 0, closed = 0;
+  ASSERT_TRUE(session->Submit(KeyInput('a'), [&](bool ok, auto) {
+    EXPECT_TRUE(ok); ++application;
+    EXPECT_TRUE(session->Close([&](bool done, auto) { EXPECT_TRUE(done); ++closed; }));
+    EXPECT_FALSE(session->Submit(KeyInput('b'), {}));
+  }));
+  RunLoop(loop, 150); EXPECT_EQ(application, 1); EXPECT_EQ(closed, 1);
+  auto received = peer->Snapshot(); ASSERT_EQ(received.size(), 4);
+  EXPECT_EQ(received.back().type(), commands::Input::DELETE_SESSION); EXPECT_EQ(received.back().id(), 77);
+  EXPECT_FALSE(session->Close({})); EXPECT_FALSE(session->Submit(KeyInput('c'), {}));
+}
+TEST(AsyncSessionTest, AddonQueueOwnsRetiredSessionUntilDeleteCompletion) {
+  fcitx::EventLoop loop; auto peer = std::make_shared<Peer>();
+  auto cleanup = std::make_shared<SessionCloseQueue>();
+  auto session = std::make_shared<AsyncSession>(loop, LinuxDeadlineEndpoint{}, [peer](const auto&) { return peer->Connect(); });
+  std::weak_ptr<AsyncSession> weak = session;
+  ASSERT_TRUE(session->Submit(KeyInput('a'), [&](bool ok, auto) {
+    EXPECT_TRUE(ok); cleanup->Retire(session); session.reset(); EXPECT_FALSE(weak.expired());
+  }));
+  RunLoop(loop, 150); EXPECT_TRUE(weak.expired()); EXPECT_EQ(cleanup->size(), 0);
+  ASSERT_EQ(peer->Snapshot().size(), 4); EXPECT_EQ(peer->Snapshot().back().type(), commands::Input::DELETE_SESSION);
+}
+TEST(AsyncSessionTest, CleanupOwnerTeardownCancelsDeleteWithoutCallingInputOwner) {
+  fcitx::EventLoop loop; auto peer = std::make_shared<Peer>();
+  auto cleanup = std::make_shared<SessionCloseQueue>(); int calls = 0;
+  auto session = std::make_shared<AsyncSession>(loop, LinuxDeadlineEndpoint{}, [peer](const auto&) { return peer->Connect(); });
+  std::weak_ptr<AsyncSession> weak = session;
+  ASSERT_TRUE(session->Submit(KeyInput('a'), [&](bool ok, auto) {
+    EXPECT_TRUE(ok); ++calls; cleanup->Retire(session); session.reset(); cleanup->Cancel();
+  }));
+  RunLoop(loop, 100); EXPECT_TRUE(weak.expired()); EXPECT_EQ(cleanup->size(), 0); EXPECT_EQ(calls, 1);
+  EXPECT_EQ(peer->Snapshot().size(), 3);
+  auto unused = std::make_shared<AsyncSession>(loop); cleanup->Retire(unused);
+  EXPECT_TRUE(unused->failed()); EXPECT_EQ(cleanup->size(), 0);
+}
+TEST(AsyncSessionTest, DeleteBeforeCreateDoesNotPrepareOrCreateSession) {
+  fcitx::EventLoop loop; int prepared = 0, called = 0;
+  auto session = std::make_shared<AsyncSession>(loop, LinuxDeadlineEndpoint{}, [&](const auto&) { ++prepared; return -1; });
+  EXPECT_FALSE(session->Close([&](bool, auto) { ++called; }));
+  auto cleanup = std::make_shared<SessionCloseQueue>(); cleanup->Retire(session);
+  RunLoop(loop, 20); EXPECT_EQ(prepared, 0); EXPECT_EQ(called, 0); EXPECT_EQ(cleanup->size(), 0);
+}
+TEST(AsyncSessionTest, SlowDeleteDoesNotBlockInputLoopOrRetainContextOwner) {
+  fcitx::EventLoop loop; auto peer = std::make_shared<Peer>(); peer->delete_delay = 500ms;
+  auto cleanup = std::make_shared<SessionCloseQueue>();
+  auto session = std::make_shared<AsyncSession>(loop, LinuxDeadlineEndpoint{}, [peer](const auto&) { return peer->Connect(); });
+  std::weak_ptr<AsyncSession> weak = session; int ticks = 0;
+  auto tick = loop.addTimeEvent(CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC)+5000, 1,
+      [&](auto* source, auto) { ++ticks; source->setTime(fcitx::now(CLOCK_MONOTONIC)+5000); source->setEnabled(true); return true; });
+  tick->setOneShot();
+  ASSERT_TRUE(session->Submit(KeyInput('a'), [&](bool ok, auto) { EXPECT_TRUE(ok); cleanup->Retire(session); session.reset(); }));
+  RunLoop(loop, 650); EXPECT_GT(ticks, 50); EXPECT_TRUE(weak.expired()); EXPECT_EQ(cleanup->size(), 0);
 }
 TEST(AsyncRpcTest, TimeoutDisconnectOversizeAndCancel) {
   for (int mode = 0; mode < 4; ++mode) {

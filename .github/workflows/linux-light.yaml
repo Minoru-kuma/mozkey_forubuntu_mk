@@ -112,6 +112,8 @@ jobs:
               //unix/fcitx5:callback_queue_test //unix/fcitx5:connection_preparation_test \
               //unix/fcitx5:frontend_boundary_test //unix/fcitx5:async_session_test \
               //unix/fcitx5:input_pipeline_test //unix/fcitx5:async_config_test \
+              //unix/fcitx5:input_recovery_test //unix/fcitx5:frame_translator_test \
+              //unix/fcitx5:response_guard_test \
               --//:linux_mozkey=true --config release_build --jobs=2 \
               --test_output=errors --test_timeout=60 \
               --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \

@@ -15,7 +15,7 @@
       "upstream_bytes": 3604,
       "local_path": "BUILD.bazel",
       "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
-      "changes": "Opt-in Linux/manual targets; add asynchronous RPC/session, retained input, worker configuration, limited tests and staging inputs"
+      "changes": "Linux opt-in/manual targets, private snapshot proto, async cleanup/recovery/compose/response guards and tests; no direct engine"
     },
     {
       "upstream_path": "src/unix/fcitx5/fcitx_key_event_handler.cc",
@@ -79,7 +79,7 @@
       "upstream_bytes": 1603,
       "local_path": "mozc_client_interface.h",
       "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
-      "changes": "Asynchronous Submit/Cancel interface and cached readiness/config only; no synchronous client"
+      "changes": "Asynchronous Submit/Cancel with addon-owned session cleanup; cached readiness/config"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_client_pool.cc",
@@ -87,7 +87,7 @@
       "upstream_bytes": 4103,
       "local_path": "mozc_client_pool.cc",
       "license_notice": "BSD-3-Clause",
-      "changes": "Pass EventLoop to per-IC asynchronous client; retain original notice"
+      "changes": "Pass loop and bounded addon cleanup owner to per-IC client"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_client_pool.h",
@@ -95,7 +95,7 @@
       "upstream_bytes": 2597,
       "local_path": "mozc_client_pool.h",
       "license_notice": "BSD-3-Clause",
-      "changes": "Require EventLoop for asynchronous clients; retain original notice"
+      "changes": "Own loop reference and shared cleanup owner; original BSD notice retained"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_engine.cc",
@@ -103,7 +103,7 @@
       "upstream_bytes": 11275,
       "local_path": "mozc_engine.cc",
       "license_notice": "LGPL-2.0-or-later",
-      "changes": "Dedicated Mozkey registration; asynchronous settings; process-exit cancellation/bounded wait; retained input inspection; no GUI launch"
+      "changes": "Mozkey actions/settings; explicit private snapshot save/inspect, bounded exit snapshot/native join; cancel cleanup on unload; no tool/browser spawn"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_engine.h",
@@ -111,7 +111,7 @@
       "upstream_bytes": 6832,
       "local_path": "mozc_engine.h",
       "license_notice": "LGPL-2.0-or-later",
-      "changes": "Mozkey live settings; register active states; own asynchronous configuration/exit hooks; disable external tool settings"
+      "changes": "Own bounded cleanup and recovery IO; track joined/durable shutdown separately; Mozkey live settings"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_engine_factory.cc",
@@ -127,7 +127,7 @@
       "upstream_bytes": 1882,
       "local_path": "mozc_ipc_client.cc",
       "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
-      "changes": "Replace synchronous ClientFactory adapter with asynchronous session; cached config only"
+      "changes": "Retire shared async sessions for addon-owned DELETE_SESSION; no synchronous client or app callbacks during cleanup"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_ipc_client.h",
@@ -135,7 +135,7 @@
       "upstream_bytes": 1418,
       "local_path": "mozc_ipc_client.h",
       "license_notice": "Repository BSD-3-Clause; no explicit per-file header",
-      "changes": "Own asynchronous session and cancellation; remove blocking client dependency"
+      "changes": "Shared async session plus cleanup owner; immediate cancellation without waiting"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_response_parser.cc",
@@ -159,7 +159,7 @@
       "upstream_bytes": 15151,
       "local_path": "mozc_state.cc",
       "license_notice": "BSD-3-Clause",
-      "changes": "Journal physical input before consumption; deferred translation/config/session commands; staged UI/commit/deletion with focus/lifetime guards; retain uncertain input"
+      "changes": "Journal/deferred key handling, compose prefix/Unicode protection, exact response/selection/deletion guards; focus empty-state reinitialization; bounded inspection"
     },
     {
       "upstream_path": "src/unix/fcitx5/mozc_state.h",
@@ -167,7 +167,7 @@
       "upstream_bytes": 6280,
       "local_path": "mozc_state.h",
       "license_notice": "BSD-3-Clause",
-      "changes": "Own input pipeline, retention, lifetime/epoch guards and staged result/deletion"
+      "changes": "Own per-IC pipeline, epoch/lifetime and staged frontend effects; original BSD notice retained"
     },
     {
       "upstream_path": "src/unix/fcitx5/surrounding_text_util.cc",
@@ -187,5 +187,5 @@
     }
   ],
   "repository_license": "UPSTREAM-LICENSE (BSD-3-Clause); explicit per-file LGPL notices take precedence",
-  "local_additions": "async_rpc/session, input_pipeline, async_config, preparation_worker/connection_preparation, callback_queue and their tests: local Mozkey BSD-3-Clause additions; no new upstream import"
+  "local_additions": "Local BSD-3-Clause additions: async_rpc/session and addon-owned close queue; input_pipeline; frame_translator; response_guard; input_recovery private proto/codec; async_config private file I/O; native preparation_worker/final task, connection_preparation, callback_queue and tests. No additional upstream source import."
 }

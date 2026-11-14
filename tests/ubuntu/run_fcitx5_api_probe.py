@@ -27,5 +27,5 @@ with tempfile.TemporaryDirectory(prefix='mozkey-fcitx-api-') as directory:
                     *shlex.split(flags), '-ldl'], check=True, timeout=60)
     subprocess.run([binary, module], check=True, timeout=20)
     # Ordinary C++ process exit with a completed vs still-blocked worker.
-    for delay in ('350', '3500'):
+    for delay in ('0', '350', '3500', '-350', '-3500'):
         subprocess.run([binary, module, delay], check=True, timeout=3)

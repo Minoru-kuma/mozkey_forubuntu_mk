@@ -793,3 +793,76 @@ buildifier `--mode=check -r src`、`git diff --check`、workflow YAML/埋込shel
 Linux jobログでは既存6targetが全てcacheによる成功、helper/非同期モデルPoCも成功だった。Fcitx5 5.1.19+ SDKがないため、実APIと新規3targetを含む製品境界試験は実際に**NOT EXECUTED**。新3targetの実行証拠は前述のローカル97ケースであり、CI実行成功ではない。Linux/Windows/macOS/AndroidのフルCIと全6系統成功は引き続き未検証。
 
 この追記は結果記録のみで実装/受入判定を変えない。追記後のHEADでも新規stagingへ再配置し、作業ブランチとの一致、dirty=false、同じ60ファイルhashを確認して報告する。追記commitのCIを実装SHAの結果から類推せず、最終報告で対象を区別する。
+
+## 再開後：終了・復旧・compose・応答副作用の限定実装（2026-11-13〜14）
+
+**判定：承認範囲で実装を再開し、製品buildと15ターゲット138ケースが成功。2Aは未完了、factory常時拒否/Enabled=Falseを維持。** 未達を工程間のレビュー待ちへ置き換えず、独立して進められる実装・試験を継続した。今回も実IME/server/toolの起動・導入、既存IME/システム設定変更、sudo/apt、2B以降、main統合は行わない。
+
+### 基点と保護
+
+既存`P2/checkout` / `feat/ubuntu-phase2a`、開始HEAD `e54d3110f313880b6948c61b332be5ad9c83c89a`、開始時clean。originは既存SSH URLのまま。最新mainはGitHub APIで`b489fca1561bf12ff6b43205378220163d71c21c`を再確認し、正本文書・前回実装と結果を読んだ。原worktreeのステージ済み5ファイル/未ステージ差分のhash、基準76資産のサイズ/hash、既存cacheを照合して保持した。新しいbranch/worktree、stash/reset/rebase/force push/PRは作らない。
+
+### 実装した変更
+
+| 対象 | 今回の実装・確認 | 限界 |
+|---|---|---|
+| worker所有・通常終了 | Rootが1本のjoinable pthreadを所有。seal後はjob、最終タスク1件、TLS destructorまで含めtryjoin。成功時は実thread回収済み。400msから10msとserialize等の経過時間を引く。予算切れ後は最終保存も取消す | syscall中の永久停止を強制停止できず、未回収時のruntime終了安全性は未証明 |
+| 復旧snapshot | private proto、version/size/checksum、0700 directory/0600 file、NOFOLLOW/owner/hardlink拒否、temp/RENAME_NOREPLACE、file/directory fsync。明示save/inspectと通常終了時の最終保存を接続。writer終了後の新processでdecode成功 | 1MiBを超える記録、保存不能、異常終了時の全入力保全、archive一覧/解決/容量管理は未完成 |
+| 入力/寿命 | validな既知応答はfocus喪失後もoutcomeとして保護。同期sender/translator中の破棄もweak lifetimeで拒否。古いcallbackで不確定outcomeを上書きしない。実Core KeyEventと製品pipeline/translatorを接続した隔離試験 | queue満杯後の旧新入力順序と、実frontendのend-to-end配送は未証明 |
+| compose | prefixを別dequeで保持、完成Unicodeは非同期key_stringへ。一度だけ文字列確定し、最終raw文字だけを誤転送しない。Escapeで明示取消、無効sequenceは保留。prefix/Unicodeもsnapshotへ保存 | 実XCompose table/locale、Wayland/X11と実IMEで未検証 |
+| session解放/focus | addon所有の最大32件のCloseQueueが既存IDへDELETE_SESSIONだけを送る。contextのapp callbackを切り、owner終了時はqueue/IOを取消す。空状態のfocus returnでは新sessionへ進める | 取消/上限/失敗時のserver側資源解放、専用server起動・終了所有は未検証/未完成 |
+| 応答副作用guard | 再変換拒否/空replacementでは選択を削除しない。snapshot/cursor/anchor、文字単位範囲、frontend capabilityを検査。invalid mode/UTF-8、consumedとresult/deleteの矛盾を保留。古いcallbackの確定/削除/挿入は捨てず保留し、純UIだけskip | 実appでの部分適用後の完全な救済は未検証。入力安全全体の合格ではない |
+| callback Space | 無選択時のSPACE要求がunconsumedでも、現在generationでは文字列を一度だけ挿入。raw keyを誤転送しない | 実serverの全callback/macro系列は未検証 |
+
+`mozkey-recovery/`はFcitx PkgConfig root内のMozkey専用subdirectory。snapshotには入力・周辺/選択情報が**平文**で含まれる。入力ログや暗号化保管ではない。今回書いたデータは隔離fixtureの固定文字だけで、実ユーザー入力は読取り/保存していない。future製品ではpassword/sensitive capability時に保存/閲覧を拒否し、surrounding capabilityがなければ旧周辺textを採取しない。新しいsnapshotは旧ファイルを上書きせず、privateな`latest` pointerだけを更新する。破損/更新失敗の既存ファイルも保持する。読取り表示は16KiB/UTF-8境界で制限し、元データを切り詰めない。自動key再送・自動commit・別IME/別欄への自動配送は行わない。
+
+### 限定試験・実測
+
+同じ隔離HOME/XDG、既存Phase 1 toolchain/repository/disk cache、`--repository_disable_download --jobs=2 --config=release_build --//:linux_mozkey=true`を再利用した。再現commandは`P2/run_resume_tests.py`と`P2/logs/resume-product-20261113.log`/metricsに記録。最終runは終了code0、48.692秒、workspace peak6,666,981,376 bytes（約6.21GiB）、RX差分上限251,057 bytes。RXは依存取得量そのものではなく、依存取得は禁止したまま。cold解析/compileとcache再利用を区別する。最後のrunのtestは全て入力digest一致のcache hit、変更した製品境界は再build成功。
+
+| 対象 | 成功数 | 内容 |
+|---|---:|---|
+| 既存linux_deadline/client/ipc | 21+30+1 | 既存52資産を維持、関連回帰成功 |
+| system_util/process_mutex/ipc_path_manager | 3+3+5 | 専用設定ONの関連境界 |
+| callback_queue/connection_preparation/frontend_boundary | 5+5+6 | 既存callback、検証済みFD/translator等 |
+| async_session | 11 | 初期化/500ms・1s/取消に加えDELETE_SESSION、retired owner保持、500ms解放遅延、addon取消、未作成sessionの非起動 |
+| input_pipeline | 19 | consume前保存、keyup/modifier/time順序、focus、既知outcome、破棄/同期callback、compose/取消/失敗、Unicodeとcallback Spaceを一度だけ配送 |
+| input_recovery | 11 | private保存・別process読取り、破損/サイズ/権限/上書き拒否、終了最終タスク、予算切れ後の非保存、index失敗、表示上限 |
+| frame_translator | 4 | compose prefix/Unicode、modifier/keyup迂回、Escape/無効sequence、invalid UTF-8 |
+| response_guard | 10 | 再変換拒否、Unicode選択両方向、text/cursor/anchor変化、空replacement、範囲overflow、capability、mode/result整合、古い副作用 |
+| 合計 | 138 | 15ターゲット成功。fixture入口1 skipは親からの子process起動で別途実行されるもの |
+
+復旧のfixtureは同じtest binaryをposix_spawnする。writerが通常終了した後、別readerがファイルを読んでdecodeする。製品IME/serverの起動ではない。childのBazel premature-exit/XML環境を引き継がないようにし、親test結果との干渉を除いた。実Core試験もInputContextManager/KeyEvent/forwardKey/commitStringをsynthetic frontendへ接続するもので、Instance/addon/実appは起動しない。
+
+| snapshot終了fixture | 最新logの待機 | 結果 |
+|---|---:|---|
+| 350ms準備後に保存 | 350.324ms | joined=1、durable=1。別readerで内容確認 |
+| 3500ms準備停止 | 390.060ms | joined=0、durable=0、未回収/未保存と判定 |
+| 10ms予算切れ後もfixtureを生存 | 10.059ms | 後で準備が完了してもsnapshotを新規保存しない。後続joinは可能 |
+| index更新拒否 | 349.741ms | joined=1、durable=0。snapshot本体と旧indexを保持し、成功へ読み替えない |
+
+3500msは永久停止の有限モデルで、実kernel/filesystemをD状態へ入れた試験ではない。診断assertのscheduler余裕を400ms合格基準へ読み替えず、実測と未検証を残す。full Fcitx processの終了総時間は未測定。
+
+`tests/ubuntu/run_fcitx5_api_probe.py`も最終worker sourceで成功（`P2/logs/fcitx5-api-resume-final-source-20261113.log`）。thread/TLS両方の350ms・3500msを追加した。通常job350msは349.374msでjoin/TLS完了、TLSだけ350ms停止は350.596msで完了。3500ms job/TLSは390.109/390.058msで未回収を返す。0ms jobの取消・idle終了は1.066ms。既存の所有/FD/peer/API/loop試験もPASS。旧100/250msは参考値、ひらがな表示300ms・実live500ms/約1sの受入成功は未検証。
+
+応答guard追加の初回コマンドは自動承認レビューの時間切れで**実行前に拒否**された。状態確認後、workspace内編集と既存runnerによる限定検証を分けて1回再試行し成功した。危険性が理由の拒否ではなく、権限の回避・新しいtool導入はしていない。
+
+### staging・CI・残る境界
+
+`stage_inputs`の専用server/tool、factory拒否.soをbuildし、staging scriptはprivate `.proto`も同梱するよう拡張した。新しいstagingだけを作り、旧60ファイル等を保持する。ELF64/x86_64、単一factory export、host RPATH不在、manifest/hashを検査する。実行時パスは`/usr/lib/mozkey`のままで、stagingをPATH/実行経路へ混ぜない。
+
+軽量CIの既存SDK条件へinput_recovery/frame_translator/response_guardを追加した。trigger/permissions/concurrency/cache方針は不変、SDKの追加導入なし。Ubuntu 24.04のSDK不足時は実API/製品境界がNOT EXECUTEDであることを維持する。buildifier check、YAML/埋込shell/Python構文、git diff --check、来歴manifestと参照targetを検査。未導入actionlint/clang-formatを追加取得しない。StandardPath deprecated警告は残る。
+
+全6系統CIはこのセッションの`gh`/token/dispatch tool不足で未実行・未検証。認証の回避・別branch作成・main変更で代用しない。通常pushの実CI結果はpush後に対象SHAで別途照合し記録する。
+
+| 条件 | 現在 | 残件 |
+|---|---|---|
+| A1 由来 | 実施 | 固定SHA/通知/来歴更新、元資産保持 |
+| A2 独立性 | 部分実施 | 専用ID/profile/IPC/実行pathを保持。実共存・起動所有の最終証拠なし |
+| A3 build/staging | 部分実施 | 専用成果物と導入禁止staging更新。入力可能addonではない |
+| A4 callback/UI | 部分実施 | compose/再変換/副作用guard/Spaceを接続・限定検証。実macro/UI全経路未検証 |
+| A5 応答性・入力安全 | 未達 | finite終了保存/join成立。満杯時入力順序、永久I/O/保存不能/部分適用後の完全復旧は未解決 |
+| A6 回帰 | 部分実施 | 138成功、実API fixture成功。全6系統/実IME/他OS未検証 |
+| A7 資源/保護 | 今回範囲で充足 | jobs=2、60GiB/新規取得2GiB以内、元差分/76資産・旧staging保持、ホスト設定変更0 |
+
+factoryを外す条件は揃っていない。とくにqueue満杯で新キーが先にpass-throughし得る現行動作、保存に失敗したままのprocess終了、永久停止したworkerとruntime破棄、archiveの解決/容量管理、専用server非同期起動/終了所有が残る。安全性を省略せず無効のままにする。2A完了扱いと2B移行は行わず、承認済み実装の進捗・未達・実行禁止の検証を区別する。

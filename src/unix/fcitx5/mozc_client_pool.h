@@ -46,7 +46,8 @@ class MozcClientPool : public TrackableObject<MozcClientPool> {
   friend class MozcClientInterface;
 
  public:
-  MozcClientPool(PropertyPropagatePolicy initialPolicy, EventLoop& loop);
+  MozcClientPool(PropertyPropagatePolicy initialPolicy, EventLoop& loop,
+                 std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup);
 
   void setPolicy(PropertyPropagatePolicy policy);
   PropertyPropagatePolicy policy() const { return policy_; }
@@ -59,6 +60,7 @@ class MozcClientPool : public TrackableObject<MozcClientPool> {
   void unregisterClient(const std::string& key);
   PropertyPropagatePolicy policy_;
   EventLoop& loop_;
+  std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup_;
   std::unordered_map<std::string, std::weak_ptr<MozcClientInterface>> clients_;
 };
 

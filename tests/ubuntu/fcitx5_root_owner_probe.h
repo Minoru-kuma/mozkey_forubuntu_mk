@@ -68,14 +68,15 @@ void RootOwnerProbe(const char* path) {
 }
 int ProcessExitProbe(const char* path, int delay_ms) {
   WorkerAPI api(path);
-  auto start_job = api.symbol<void*(int)>("a5_worker_start");
+  auto start_job = api.symbol<void*(int)>(delay_ms < 0 ? "a5_worker_start_tls" : "a5_worker_start");
   auto close_job = api.symbol<void(void*)>("a5_worker_close");
-  auto running = api.symbol<int()>("a5_worker_running");
+  auto running = api.symbol<int()>(delay_ms < 0 ? "a5_worker_tls_started" : "a5_worker_running");
   auto wait_exit = api.symbol<bool(int)>("a5_worker_wait_exit");
-  void* owner = start_job(delay_ms);
+  auto tls_exits = api.symbol<int()>("a5_worker_tls_exits");
+  void* owner = start_job(delay_ms < 0 ? -delay_ms : delay_ms);
   Check(owner != nullptr, "exit worker start");
   const auto startup = std::chrono::steady_clock::now();
-  while (running() == 0) {
+  while (delay_ms != 0 && running() == 0) {
     Check(std::chrono::steady_clock::now() - startup < std::chrono::seconds(1),
           "worker did not start");
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -85,10 +86,15 @@ int ProcessExitProbe(const char* path, int delay_ms) {
   bool completed = wait_exit(400);
   const double elapsed = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - begin).count();
-  Check(completed == (delay_ms == 350) && elapsed < 500,
+  Check(completed == (std::abs(delay_ms) != 3500) && elapsed < 500,
         "bounded process-exit wait");
+  Check(start_job(0) == nullptr, "shutdown seal rejects new jobs");
+  if (completed) {
+    Check(delay_ms == 0 || tls_exits() == 1, "successful shutdown includes TLS destruction");
+    Check(wait_exit(0), "repeated shutdown of joined worker");
+  }
   std::cout << "PROCESS_EXIT delay_ms=" << delay_ms << " wait_ms=" << elapsed
-            << " completed=" << completed << "\n";
+            << " completed=" << completed << " tls_exits=" << tls_exits() << "\n";
   // Normal C++ return, including Library destruction; no _Exit workaround.
   return 0;
 }

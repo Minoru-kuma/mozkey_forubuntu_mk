@@ -54,6 +54,9 @@
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "unix/fcitx5/fcitx_key_event_handler.h"
+#include "unix/fcitx5/frame_translator.h"
+#include "unix/fcitx5/input_recovery.h"
+#include "unix/fcitx5/response_guard.h"
 #include "unix/fcitx5/i18nwrapper.h"
 #include "unix/fcitx5/mozc_engine.h"
 #include "unix/fcitx5/mozc_response_parser.h"
@@ -99,19 +102,11 @@ bool MozcState::EnsurePipeline() {
         auto* ic = watch.get();
         if (!ic || !ic->hasFocus() || engine_->instance()->inputMethod(ic) != "mozkey") return false;
         const auto frame = retained_->delivering;
-        if (frame && !frame->physical && frame->generation != epoch_) {
-          if (output.has_result()) { pipeline_->Hold("stale-command-result"); return false; }
-          return true; // Superseded UI-only live response; no commit is dropped.
-        }
-        if (frame && frame->selected_length != 0) {
-          const auto& surrounding = ic->surroundingText();
-          if (!surrounding.isValid() || surrounding.text() != frame->selection_snapshot ||
-              surrounding.cursor() != frame->cursor || surrounding.anchor() != frame->anchor) {
-            pipeline_->Hold("selection-changed"); return false;
-          }
-          auto* range = output.mutable_deletion_range();
-          range->set_offset(frame->selected_length > 0 ? -frame->selected_length : 0);
-          range->set_length(frame->selected_length > 0 ? frame->selected_length : -frame->selected_length);
+        if (frame) {
+          const auto decision = mozc::fcitx5::PrepareResponse(*frame, epoch_, ic->surroundingText(),
+              ic->capabilityFlags().test(CapabilityFlag::SurroundingText), &output);
+          if (decision == mozc::fcitx5::ResponseDecision::Hold) { pipeline_->Hold("response-effect-guard"); return false; }
+          if (decision == mozc::fcitx5::ResponseDecision::SkipUI) return true;
         }
         auto valid = DeliveryValid();
         if (frame && frame->request && !ParseResponse(output)) return false;
@@ -119,6 +114,9 @@ bool MozcState::EnsurePipeline() {
         ic = watch.get();
         if (!ic || !ic->hasFocus()) return false;
         if (!valid()) return false;
+        if (forward && !forward->composed_text.empty()) {
+          ic->commitString(forward->composed_text); return valid();
+        }
         if (forward) ic->forwardKey(forward->raw, forward->release, forward->time);
         return watch.isValid();
       });
@@ -128,19 +126,26 @@ bool MozcState::EnsurePipeline() {
 }
 void MozcState::TranslateFrame(mozc::fcitx5::InputFrame& frame) {
   if (!frame.physical) return;
-  mozc::commands::KeyEvent key;
-  if (!handler_->GetKeyEvent(frame.raw.sym(), frame.raw.code(), frame.raw.states(),
-                            preedit_method_, frame.japanese_layout, frame.release, &key)) {
-    frame.request.reset(); return;
+  mozc::fcitx5::TranslateInputFrame(frame, *handler_, preedit_method_, [this](KeySym sym) {
+    auto value = engine_->instance()->processComposeString(ic_, sym);
+    if (!value) return mozc::fcitx5::ComposeResult{
+        engine_->instance()->isComposing(ic_) ? mozc::fcitx5::ComposeResult::Pending : mozc::fcitx5::ComposeResult::Cancelled, {}};
+    return mozc::fcitx5::ComposeResult{value->empty() ? mozc::fcitx5::ComposeResult::None :
+        mozc::fcitx5::ComposeResult::Complete, std::move(*value)};
+  });
+  if (!frame.request) return;
+  auto& input = *frame.request;
+  const auto& surrounding = ic_->surroundingText();
+  if (ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) &&
+      surrounding.isValid() && surrounding.text().size() <= 65536) {
+    frame.surrounding_valid = true; frame.selection_snapshot = surrounding.text();
+    frame.cursor = surrounding.cursor(); frame.anchor = surrounding.anchor();
   }
-  mozc::commands::Input input; input.set_type(mozc::commands::Input::SEND_KEY);
-  *input.mutable_key() = std::move(key);
   SurroundingTextInfo text;
   if (ic_->surroundingText().text().size() <= 65536 && GetSurroundingText(ic_, &text, nullptr)) {
     input.mutable_context()->set_preceding_text(text.preceding_text);
     input.mutable_context()->set_following_text(text.following_text);
   }
-  frame.request = std::move(input);
 }
 void MozcState::UpdatePreeditMethod() {
   if (!EnsurePipeline()) return;
@@ -182,6 +187,13 @@ bool MozcState::SubmitCommand(mozc::commands::SessionCommand command) {
   if (!EnsurePipeline() || pipeline_->suspended()) return false;
   mozc::fcitx5::InputFrame frame; frame.physical = false; frame.translated = true;
   frame.generation = epoch_;
+  const auto& surrounding = ic_->surroundingText();
+  if (ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) &&
+      surrounding.isValid() && surrounding.text().size() <= 65536) {
+    frame.surrounding_valid = true; frame.selection_snapshot = surrounding.text();
+    frame.cursor = surrounding.cursor(); frame.anchor = surrounding.anchor();
+  }
+
   if (command.type() == mozc::commands::SessionCommand::CONVERT_REVERSE ||
       command.type() == mozc::commands::SessionCommand::RECONVERT_SELECTION_OR_INSERT_SPACE) {
     SurroundingTextInfo text;
@@ -196,6 +208,7 @@ bool MozcState::SubmitCommand(mozc::commands::SessionCommand command) {
       if (frame.selected_length == 0) {
         mozc::commands::Input input; input.set_type(mozc::commands::Input::SEND_KEY);
         input.mutable_key()->set_special_key(mozc::commands::KeyEvent::SPACE);
+        frame.composed_text = " ";
         frame.request = std::move(input); return pipeline_->Submit(std::move(frame));
       }
       command.set_type(mozc::commands::SessionCommand::CONVERT_REVERSE);
@@ -228,8 +241,8 @@ bool MozcState::Paging(bool prev) {
 }
 void MozcState::FocusIn() {
   CancelCallbacks();
+  if (pipeline_ && pipeline_->suspended()) { ShowRetained(); return; }
   if (!EnsurePipeline()) return;
-  if (pipeline_->suspended()) { ShowRetained(); return; }
   UpdatePreeditMethod();
   SendCompositionMode(composition_mode_);
   DrawAll();
@@ -237,6 +250,10 @@ void MozcState::FocusIn() {
 void MozcState::FocusOut(const InputContextEvent&) {
   CancelCallbacks();
   if (pipeline_) pipeline_->Hold("focus-or-ime-switch");
+  if (retained_ && retained_->pending.empty() && retained_->composing.empty() &&
+      retained_->preedit.empty() && !retained_->delivering && !retained_->outcome) {
+    pipeline_.reset(); retained_.reset(); client_.reset();
+  }
   handler_->Clear();
   const auto watch = ic_->watch();
   const auto weak = std::weak_ptr<int>(lifetime_);
@@ -251,11 +268,7 @@ void MozcState::ShowRetained() {
   if (ic_->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
   // Explicit inspection only: never replay uncertain commits/raw keys.
   std::string text = _("Input retained; automatic delivery is suspended");
-  for (const auto& record : mozc::fcitx5::InputRetention::Snapshot()) {
-    text += "\n" + record->preedit;
-    if (record->delivering) text += " [" + record->delivering->raw.toString() + "]";
-    for (const auto& frame : record->pending) if (frame.physical) text += " [" + frame.raw.toString() + "]";
-  }
+  text += mozc::fcitx5::InputRecovery::Inspect(mozc::fcitx5::InputRetention::Snapshot());
   ic_->inputPanel().setAuxUp(Text(text));
   ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
 }

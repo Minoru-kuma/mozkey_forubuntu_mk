@@ -19,7 +19,7 @@ std::shared_ptr<RetainedInput> InputRetention::Reserve() {
   return record;
 }
 void InputRetention::ReleaseEmpty(const std::shared_ptr<RetainedInput>& record) {
-  if (record && record->pending.empty() && record->preedit.empty() && !record->delivering) {
+  if (record && record->pending.empty() && record->composing.empty() && record->preedit.empty() && !record->delivering && !record->outcome) {
     auto& records = Records();
     records.erase(std::remove(records.begin(), records.end(), record), records.end());
   }
@@ -65,19 +65,46 @@ void InputPipeline::SetReady(bool ready) {
 void InputPipeline::Next() {
   if (!ready_) { active_ = false; return; }
   if (record_->suspended || record_->pending.empty()) { active_ = false; return; }
-  if (!valid_()) { Hold("focus-or-epoch-changed"); return; }
+  auto weak = std::weak_ptr<int>(lifetime_);
+  auto valid = valid_;
+  const bool eligible = valid();
+  if (weak.expired() || record_->suspended) return;
+  if (!eligible) { Hold("focus-or-epoch-changed"); return; }
   if (!record_->pending.front().translated && translate_) {
-    translate_(record_->pending.front());
+    auto translate = translate_;
+    auto translated = record_->pending.front();
+    translate(translated);
+    if (weak.expired()) return;
+    if (record_->suspended) return;
+    record_->pending.front() = std::move(translated);
     record_->pending.front().translated = true;
+  }
+  const auto compose = record_->pending.front().compose;
+  if (compose == InputFrame::Compose::Error) { Hold("compose-invalid"); return; }
+  if (compose == InputFrame::Compose::Pending) {
+    if (record_->composing.size() >= 16) { Hold("compose-prefix-full"); return; }
+    record_->composing.push_back(std::move(record_->pending.front()));
+    record_->pending.pop_front(); Schedule(); return;
   }
   const auto token = ++token_;
   auto complete = [this, token, weak = std::weak_ptr<int>(lifetime_)](bool ok, commands::Output output) {
     if (weak.expired()) return;
     if (token != token_ || record_->suspended) return;
-    if (!ok || !valid_()) { Hold(ok ? "focus-or-epoch-changed" : "rpc-failed"); return; }
+    if (!ok) { Hold("rpc-failed"); return; }
+    auto valid = valid_;
+    const bool eligible = valid();
+    if (weak.expired() || token != token_ || record_->suspended) return;
+    if (!eligible) {
+      // Preserve a validated response even when the original destination is no
+      // longer eligible. It is inspection data, never a reason to replay.
+      record_->delivering = std::move(record_->pending.front());
+      record_->pending.pop_front(); record_->outcome = std::move(output);
+      Hold("response-after-focus-change"); return;
+    }
     ++token_; // Duplicate callbacks cannot deliver/commit twice.
     auto frame = std::move(record_->pending.front()); record_->pending.pop_front();
-    const bool forward = frame.physical && (!frame.request || !output.consumed());
+    const bool forward = frame.compose != InputFrame::Compose::Cancelled &&
+        (frame.physical || !frame.composed_text.empty()) && (!frame.request || !output.consumed());
     record_->delivering = frame;
     record_->outcome = output;
     auto record = record_;
@@ -87,11 +114,16 @@ void InputPipeline::Next() {
     const bool accepted = deliver(std::move(output), forward ? std::optional<InputFrame>(std::move(frame)) : std::nullopt);
     if (!accepted && !weak.expired()) Hold("delivery-interrupted");
     if (accepted && !record->suspended) {
+      if (record->delivering->compose == InputFrame::Compose::Complete ||
+          record->delivering->compose == InputFrame::Compose::Cancelled) record->composing.clear();
       record->delivering.reset(); record->outcome.reset();
     }
   };
   if (record_->pending.front().request) {
-    if (!send_(*record_->pending.front().request, std::move(complete))) Hold("submission-rejected");
+    auto send = send_;
+    auto input = *record_->pending.front().request;
+    const bool accepted = send(std::move(input), std::move(complete));
+    if (!weak.expired() && !accepted && token_ == token) Hold("submission-rejected");
   } else {
     commands::Output output;
     complete(true, std::move(output));

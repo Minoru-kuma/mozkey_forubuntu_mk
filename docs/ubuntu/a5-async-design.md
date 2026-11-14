@@ -1,5 +1,7 @@
 # A5設計・暫定受入条件：イベントループの継続性
 
+**再開後の最新境界（2026-11-13〜14）：native worker join/TLS、通常終了の最終snapshot、compose保持、非同期session解放、再変換/削除guardを実装・限定検証した。工程間レビュー待ちではない。危険な機能の有効化と2A合格は、残る安全条件・実frontend/実server・全6系統CIの証拠が不足するため保留する。以下の過去記述と差がある箇所は末尾と[最新結果](phase-02-results.md)を優先する。**
+
 **2026-11-13製品側接続の現状：同期ClientFactoryをIO/Timer/Defer駆動のclient/sessionへ置換し、準備済み同一FD、キーjournal、取消・UI適用ガード、worker上の設定I/Oを接続した。18新規ケースと関連回帰、実APIの隔離試験を実施するが、実IME/serverでの成功を意味しない。入力の安全な救済と終了時保全、実keyup/反復/compose、worker/runtime終了、server起動/セッション解放が未達・未検証。factoryは引き続き常に拒否。最新判定は[実行結果](phase-02-results.md)末尾を優先し、過去の保留/停止は当時の記録として保持する。**
 
 ## 現行方針と独立工程（2026-11-12追加指示）
@@ -154,3 +156,20 @@ workerはprocess rootのjoinable thread memberが単一slot/jobを所有する�
 - 専用serverの安全な非同期起動・回収とDELETE_SESSIONによるserver側session解放は未実装。起動済みと仮定したfixtureの成功を通常利用成功へ読み替えない。
 
 新目標は300ms未満の暫定表示目安、live500ms程度/約1sの評価、通常終了のみ400ms。旧100/250msは参考値として残す。短時間の合成測定や限定ケース成功をA5合格とせず、上記安全条件と全6系統CIの証拠が揃うまでfactoryは解除しない。
+
+
+## 再開後の終了・復旧・応答適用契約（2026-11-13〜14）
+
+job完了通知とthread終了を分ける。Rootはjoinable pthreadを1本だけ所有し、通常終了時のseal後はjob・値だけの最終保存タスク・TLS destructorsまで進め、`pthread_tryjoin_np`の成功を回収完了とする。400msから10msを留保し、serialize等の経過時間も引いた残予算で待つ。focus/IME切替/unloadでこの待機を使わない。予算切れは未回収であり、後続の最終保存も論理取消し、後になって新しい保存を開始しない。すでにsyscall中の取消不能I/Oを強制終了できる保証はない。
+
+最終タスクはsingle workerの現在jobの後ろに1件だけ置く。snapshotにはraw key/code/modifier/release/time、未配送request、compose prefix/完成Unicode、preedit、既知outcome、選択/周辺snapshotを含める。Fcitx PkgConfig rootの専用`mozkey-recovery/held-*.snapshot`へ、祖先NOFOLLOW・所有/権限・hardlink拒否、0700/0600、サイズ1MiB、checksum、temp→RENAME_NOREPLACE、file/directory fsyncを使って保存する。`latest`は独立したprivate pointerであり、snapshot本体は上書きしない。保存完了とnative joinの両方が必要で、join成功だけを保全成功にしない。index更新失敗・超過・破損を成功へ読み替えない。これは平文の復旧用データであり、暗号化や入力ログではない。壊れた既存ファイルを削除/上書きしない。
+
+明示的な保存/閲覧と通常終了時の保存を製品へ接続した。復旧は読み取り表示だけで、結果不明のcommitやraw keyを自動再配送しない。表示は16KiBとUTF-8境界で制限し、元のデータは削らない。archiveの一覧/選択・明示解決/撤去・容量管理は未完成。保存不能時や強制終了/永久停滞での文字保全は保証できていないためA5未達のままである。
+
+composeは[Instance 5.1.19](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/fcitx/instance.cpp)の、初期化時table読取りと打鍵時state更新を静的照合した。未完了prefixを別dequeで保護し、完成Unicodeをkey_stringへ渡す。unconsumedなら現在の有効ICに完成文字列を一度だけ確定し、最終物理キーだけを誤転送しない。明示Escapeだけを取消とし、無効sequenceは保留する。実locale/XCompose table・Wayland/X11の動作は未検証。
+
+`SessionCloseQueue`はaddonが最大32件を所有し、既存IDのDELETE_SESSIONだけを非同期送信する。新しいsession作成・key再送・旧IC callbackを伴わない。context所有者を破棄してもqueueが残り、addon/通常終了ではqueueをsealしてIOを取消す。成功・失敗/2s deadline・上限・owner取消を区別し、未完了のserver側資源解放は未検証。空のcontextはfocus returnで再初期化でき、入力が残るcontextは自動再開/再送しない。
+
+`response_guard`は副作用前にmode/UTF-8/consumedの整合を確認する。再変換は受理・非空replacement・選択snapshot/cursor/anchor一致が必要。一般の削除もsurrounding capabilityと送信時のexact snapshot、文字単位の範囲を要求する。拒否された再変換、空replacement、overflow、capability消失は削除せず保留する。古い非物理callbackは純UIだけskipし、確定/削除/挿入の意味がある応答を黙って捨てない。focus喪失時の既知outcomeも保持する。callback Spaceのunconsumedは現在generationだけで一度だけ挿入する。
+
+15ターゲット138成功と実API fixtureはこの限定境界の証拠。実IME、表示300ms、実live500ms/約1s、全6系統成功の代替ではない。満杯時の旧新入力順序、部分適用後の完全復旧、永久I/O/異常終了、専用server起動・終了所有、実frontend検証を残し、factoryは常に拒否する。旧100/250msは引き続き参考値である。

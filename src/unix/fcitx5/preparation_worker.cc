@@ -3,6 +3,7 @@
 #include "unix/fcitx5/preparation_worker.h"
 
 #include <sys/eventfd.h>
+#include <pthread.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -30,19 +31,37 @@ struct PreparationWorker::State {
 struct PreparationWorker::Root {
   std::mutex mutex;
   std::condition_variable ready;
-  std::condition_variable completed;
   std::shared_ptr<State> slot;
   bool pending = false;
   std::atomic<bool> sealed{false};
-  std::thread worker;  // Owned by the process root; never an unowned detach.
+  pthread_t worker{};  // Root owns this joinable Linux thread until tryjoin succeeds.
+  std::atomic<bool> started{false};
+  Job final_job;
+  std::atomic<bool> final_cancelled{false};
+  bool EnsureThread() {
+    if (started.load()) return true;
+    const int error = pthread_create(&worker, nullptr, [](void* pointer) -> void* {
+      static_cast<Root*>(pointer)->Run(); return nullptr;
+    }, this);
+    if (error) return false;
+    started.store(true); return true;
+  }
   void Run() {
       for (;;) {
         std::shared_ptr<State> state;
+        Job final;
         {
           std::unique_lock lock(mutex);
-          ready.wait(lock, [this] { return pending; });
-          pending = false;
-          state = slot;
+          ready.wait(lock, [this] { return pending || sealed.load(); });
+          if (!pending) {
+            if (!final_job) return;  // Sealed and drained: includes TLS exit.
+            final = std::move(final_job); final_job = {};
+          } else { pending = false; state = slot; }
+        }
+        if (final) {
+          try { if (!final_cancelled.load()) { const int fd = final(final_cancelled); if (fd >= 0) close(fd); } }
+          catch (...) {}  // Result owner remains false on failure.
+          continue;
         }
         int fd = -1;
         try {
@@ -63,7 +82,6 @@ struct PreparationWorker::Root {
           // unloaded, the worker's local reference performs final reclamation.
           slot.reset();
         }
-        completed.notify_all();
         uint64_t one = 1;
         ssize_t bytes;
         do { bytes = write(state->notify, &one, sizeof(one)); }
@@ -91,14 +109,7 @@ std::unique_ptr<PreparationWorker> PreparationWorker::Start(Job job) {
   // Allocate the client before starting: exceptions must not orphan a job.
   auto client = std::unique_ptr<PreparationWorker>(new PreparationWorker(state));
   root.slot = state;
-  if (!root.worker.joinable()) {
-    try {
-      root.worker = std::thread([&root] { root.Run(); });
-    } catch (...) {
-      root.slot.reset();
-      return nullptr;
-    }
-  }
+  if (!root.EnsureThread()) { root.slot.reset(); return nullptr; }
   root.pending = true;
   root.ready.notify_one();
   return client;
@@ -123,6 +134,16 @@ bool PreparationWorker::Busy() {
   root.slot.reset();
   return false;
 }
+bool PreparationWorker::SetFinalJob(Job job) {
+  auto& root = ProcessRoot();
+  std::unique_lock lock(root.mutex, std::try_to_lock);
+  if (!lock.owns_lock() || root.sealed.load() || !job) return false;
+  root.sealed.store(true);
+  if (root.slot) root.slot->cancelled.store(true);
+  root.final_job = std::move(job);
+  if (!root.EnsureThread()) return false;
+  root.ready.notify_one(); return true;
+}
 bool PreparationWorker::WaitForProcessExit(std::chrono::milliseconds budget) {
   using namespace std::chrono_literals;
   // Keep 10ms of the user's 400ms allowance for dispatch/unwinding.
@@ -131,11 +152,22 @@ bool PreparationWorker::WaitForProcessExit(std::chrono::milliseconds budget) {
   auto& root = ProcessRoot();
   root.sealed.store(true);
   std::unique_lock lock(root.mutex, std::try_to_lock);
-  if (!lock.owns_lock()) return false;
-  const auto state = root.slot;
-  if (state) state->cancelled.store(true);
-  return !state || root.completed.wait_until(lock, end, [&] {
-    return state->done.load();
-  });
+  if (!lock.owns_lock()) { root.final_cancelled.store(true); return false; }
+  if (root.slot) root.slot->cancelled.store(true);
+  lock.unlock();
+  root.ready.notify_one();
+  if (!root.started.load()) return true;
+  // Job completion is not thread completion: include callback-local destruction
+  // and TLS destructors. No unbounded std::thread::join after an early signal.
+  for (;;) {
+    const int error = pthread_tryjoin_np(root.worker, nullptr);
+    if (!error) { root.started.store(false); return true; }
+    if (error != EBUSY || std::chrono::steady_clock::now() >= end) {
+      root.final_cancelled.store(true); return false;
+    }
+    const auto remaining = end - std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::min(remaining,
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(1ms)));
+  }
 }
 }  // namespace mozc::fcitx5
