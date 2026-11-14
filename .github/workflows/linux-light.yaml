@@ -103,20 +103,35 @@ jobs:
             --disk_cache="$HOME/.cache/mozkey-linux-limited/actions" \
             --repo_env=PKG_CONFIG_PATH=
 
+      - name: Run Linux profile, lock and worker lifetime guards without an Fcitx5 SDK
+        if: steps.changes.outputs.run == 'true'
+        working-directory: src
+        run: |
+          mkdir -p "$RUNNER_TEMP/mozkey-profile-test-config"
+          chmod 700 "$RUNNER_TEMP/mozkey-profile-test-config"
+          bazelisk test //base:mozkey_profile_test //base:system_util_test \
+            //base:process_mutex_test //ipc:ipc_path_manager_test \
+            //unix/fcitx5:worker_runtime_test \
+            --//:linux_mozkey=true --config release_build --jobs=2 \
+            --test_output=errors --test_timeout=60 \
+            --test_env=XDG_CONFIG_HOME="$RUNNER_TEMP/mozkey-profile-test-config" \
+            --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \
+            --disk_cache="$HOME/.cache/mozkey-linux-limited/actions" \
+            --repo_env=PKG_CONFIG_PATH=
+
       - name: Run opt-in product boundary tests with installed Fcitx5
         if: steps.changes.outputs.run == 'true'
         working-directory: src
         run: |
           if pkg-config --exists 'Fcitx5Core >= 5.1.19' 'Fcitx5Utils >= 5.1.19'; then
-            bazelisk test //base:system_util_test //ipc:ipc_path_manager_test \
-              //unix/fcitx5:callback_queue_test //unix/fcitx5:connection_preparation_test \
+            bazelisk test //unix/fcitx5:callback_queue_test //unix/fcitx5:connection_preparation_test \
               //unix/fcitx5:frontend_boundary_test //unix/fcitx5:async_session_test \
               //unix/fcitx5:input_pipeline_test //unix/fcitx5:async_config_test \
               //unix/fcitx5:input_recovery_test //unix/fcitx5:frame_translator_test \
               //unix/fcitx5:response_guard_test \
-              //unix/fcitx5:worker_runtime_test \
               --//:linux_mozkey=true --config release_build --jobs=2 \
               --test_output=errors --test_timeout=60 \
+              --test_env=XDG_CONFIG_HOME="$RUNNER_TEMP/mozkey-profile-test-config" \
               --repository_cache="$HOME/.cache/mozkey-linux-limited/repository" \
               --disk_cache="$HOME/.cache/mozkey-linux-limited/actions" \
               --repo_env=PKG_CONFIG_PATH=

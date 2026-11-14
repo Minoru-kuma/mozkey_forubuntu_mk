@@ -187,5 +187,5 @@
     }
   ],
   "repository_license": "UPSTREAM-LICENSE (BSD-3-Clause); explicit per-file LGPL notices take precedence",
-  "local_additions": "Local BSD-3-Clause additions: async_rpc/session and addon-owned close queue; input_pipeline with serialized delivery and physical press/release tracking; frame_translator; response_guard; input_recovery private proto/codec with symmetric frame bounds; async_config private file I/O; native preparation_worker/final task and static-teardown runtime fixture, connection_preparation, callback_queue and tests. No additional upstream source import."
+  "local_additions": "Local BSD-3-Clause additions: async_rpc/session and addon-owned close queue; input_pipeline with serialized delivery and physical press/release tracking; frame_translator; response_guard; input_recovery private proto/codec with symmetric frame bounds; async_config private file I/O; native preparation_worker/final task and static-teardown runtime fixture, connection_preparation, callback_queue and tests. Linux-only src/base/mozkey_profile helpers and opt-in OFD lock/profile startup guards are local additions. No additional upstream source import."
 }

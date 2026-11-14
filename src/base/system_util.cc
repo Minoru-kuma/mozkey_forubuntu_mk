@@ -44,6 +44,9 @@
 #include "base/environ.h"
 #include "base/file_util.h"
 #include "base/port.h"
+#ifdef MOZKEY_LINUX_BUILD
+#include "base/mozkey_profile.h"
+#endif
 
 #ifdef __ANDROID__
 #include "base/android_util.h"
@@ -154,6 +157,13 @@ std::string UserProfileDirectoryImpl::GetDir() {
     return dir_;
   }
   const std::string dir = GetUserProfileDirectory();
+#ifdef MOZKEY_LINUX_BUILD
+  // This runs on preparation/startup paths, never the Fcitx event loop.
+  // Do not create through a symlinked ancestor or repair another directory.
+  const int directory = OpenMozkeyProfileDirectory(dir, true);
+  if (directory < 0) return "";
+  close(directory);
+#else
   if (absl::Status s = FileUtil::CreateDirectory(dir);
       !s.ok() && !absl::IsAlreadyExists(s)) {
     LOG(ERROR) << "Failed to create directory: " << dir << ": " << s;
@@ -161,6 +171,7 @@ std::string UserProfileDirectoryImpl::GetDir() {
   if (absl::Status s = FileUtil::DirectoryExists(dir); !s.ok()) {
     LOG(ERROR) << "User profile directory doesn't exist: " << dir << ": " << s;
   }
+#endif
 
   dir_ = dir;
   return dir_;

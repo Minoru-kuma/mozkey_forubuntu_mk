@@ -80,3 +80,9 @@ source/relinking and dictionary redistribution requirements must be checked
 before distribution. System Fcitx5/Qt libraries are dynamically linked and
 are not copied into this snapshot. Direct-engine sources are excluded;
 translations are not shipped yet and the UI falls back to source strings.
+
+Local Phase 2A implementation, including the asynchronous frontend, worker,
+input journal and Linux profile/lock helpers:
+Copyright 2026 Mozkey contributors. Licensed under BSD-3-Clause; the license
+conditions and disclaimer are reproduced in LICENSE. These additions do not
+change the licenses or copyright notices of the selected upstream files.

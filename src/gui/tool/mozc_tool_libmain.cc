@@ -38,6 +38,9 @@
 #include "absl/log/log.h"
 #include "base/init_mozc.h"
 #include "base/run_level.h"
+#ifdef MOZKEY_LINUX_BUILD
+#include "base/system_util.h"
+#endif
 #include "gui/base/debug_util.h"
 
 #ifdef __APPLE__
@@ -254,6 +257,9 @@ void SetFlagsFromEnv() {
 #endif  // __APPLE__
 
 int RunMozcTool(int argc, char *argv[]) {
+#ifdef MOZKEY_LINUX_BUILD
+  if (mozc::SystemUtil::GetUserProfileDirectory().empty()) return 1;
+#endif
 #ifdef __APPLE__
   // OSX's app won't accept command line flags.  Here we preset flags from
   // environment variables.

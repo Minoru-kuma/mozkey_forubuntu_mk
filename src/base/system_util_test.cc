@@ -37,10 +37,15 @@
 #include "base/file_util_mock.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
+#ifdef MOZKEY_LINUX_BUILD
+#include <sys/stat.h>
+#include <unistd.h>
+#include "testing/mozctest.h"
+#endif
 
 namespace mozc {
 
-class SystemUtilTest : public testing::Test {};
+class SystemUtilTest : public ::testing::Test {};
 
 #ifdef MOZKEY_LINUX_BUILD
 TEST_F(SystemUtilTest, DedicatedProductPaths) {
@@ -66,17 +71,22 @@ TEST_F(SystemUtilTest, GetUserProfileDirectory) {
 
 #elif defined(MOZKEY_LINUX_BUILD)
   EnvironMock environ_mock;
-  FileUtilMock file_util_mock;
+  auto root = testing::MakeTempDirectoryOrDie();
+  const auto home = root.path();
+  environ_mock.SetEnv("HOME", home);
+  environ_mock.SetEnv("XDG_CONFIG_HOME", "");
+  ASSERT_OK(FileUtil::CreateDirectory(home+"/.config"));
   SystemUtil::SetUserProfileDirectory("");
-  EXPECT_EQ("/home/mozcuser/.config/mozkey", SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::CreateDirectory("/home/mozcuser/.mozc"));
-  environ_mock.SetEnv("XDG_CONFIG_HOME", "/tmp/config");
+  EXPECT_EQ(home+"/.config/mozkey", SystemUtil::GetUserProfileDirectory());
+  EXPECT_OK(FileUtil::CreateDirectory(home+"/.mozc"));
+  ASSERT_OK(FileUtil::CreateDirectory(home+"/config"));
+  environ_mock.SetEnv("XDG_CONFIG_HOME", home+"/config");
   SystemUtil::SetUserProfileDirectory("");
-  EXPECT_EQ("/tmp/config/mozkey", SystemUtil::GetUserProfileDirectory());
+  EXPECT_EQ(home+"/config/mozkey", SystemUtil::GetUserProfileDirectory());
   // A legacy profile and an invalid relative XDG path never select .mozc.
   environ_mock.SetEnv("XDG_CONFIG_HOME", "relative");
   SystemUtil::SetUserProfileDirectory("");
-  EXPECT_EQ("/home/mozcuser/.config/mozkey", SystemUtil::GetUserProfileDirectory());
+  EXPECT_EQ(home+"/.config/mozkey", SystemUtil::GetUserProfileDirectory());
   SystemUtil::SetUserProfileDirectory("");
 #elif defined(__linux__)
   EnvironMock environ_mock;
@@ -125,6 +135,26 @@ TEST_F(SystemUtilTest, GetUserProfileDirectory) {
 TEST_F(SystemUtilTest, GetTotalPhysicalMemoryTest) {
   EXPECT_GT(SystemUtil::GetTotalPhysicalMemory(), 0);
 }
+#ifdef MOZKEY_LINUX_BUILD
+TEST_F(SystemUtilTest, UnsafeProfileDoesNotCreateThroughLinksOrFallback) {
+  EnvironMock environ_mock; auto root = testing::MakeTempDirectoryOrDie();
+  const auto home = root.path();
+  environ_mock.SetEnv("HOME", home); environ_mock.SetEnv("XDG_CONFIG_HOME", home);
+  ASSERT_EQ(mkdir((home+"/mozkey").c_str(), 0755), 0);
+  ASSERT_EQ(chmod((home+"/mozkey").c_str(), 0755), 0);
+  SystemUtil::SetUserProfileDirectory(""); EXPECT_TRUE(SystemUtil::GetUserProfileDirectory().empty());
+  struct stat info{}; ASSERT_EQ(stat((home+"/mozkey").c_str(), &info), 0);
+  EXPECT_EQ(info.st_mode & 0777, 0755);
+  ASSERT_EQ(rmdir((home+"/mozkey").c_str()), 0);
+  ASSERT_EQ(mkdir((home+"/other-product").c_str(), 0700), 0);
+  ASSERT_EQ(symlink((home+"/other-product").c_str(), (home+"/mozkey").c_str()), 0);
+  EXPECT_TRUE(SystemUtil::GetUserProfileDirectory().empty());
+  environ_mock.SetEnv("XDG_CONFIG_HOME", home+"/mozkey");
+  EXPECT_TRUE(SystemUtil::GetUserProfileDirectory().empty());
+  EXPECT_EQ(access((home+"/other-product/mozkey").c_str(), F_OK), -1);
+  SystemUtil::SetUserProfileDirectory("");
+}
+#endif
 
 #ifdef __ANDROID__
 TEST_F(SystemUtilTest, GetOSVersionStringTestForAndroid) {

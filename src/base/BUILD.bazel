@@ -501,6 +501,33 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "mozkey_profile",
+    srcs = ["mozkey_profile.cc"],
+    hdrs = ["mozkey_profile.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+mozc_cc_test(
+    name = "mozkey_profile_test",
+    srcs = ["mozkey_profile_test.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":mozkey_profile",
+        ":system_util",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+    ],
+)
+
+mozc_cc_library(
     name = "system_util",
     # TODO(b/269889028): win_util has cyclic dependency between this library.
     # Solve it and make them independent libraries.
@@ -535,7 +562,10 @@ mozc_cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
-    ] + mozc_select(
+    ] + select({
+        "//:linux_mozkey_enabled": [":mozkey_profile"],
+        "//conditions:default": [],
+    }) + mozc_select(
         android = [":android_util"],
         apple = ["//base/mac:mac_util"],
         windows = [
@@ -556,7 +586,10 @@ mozc_cc_test(
         ":file_util_mock",
         ":system_util",
         "//testing:gunit_main",
-    ],
+    ] + select({
+        "//:linux_mozkey_enabled": ["//testing:mozctest"],
+        "//conditions:default": [],
+    }),
 )
 
 mozc_cc_library(
@@ -630,7 +663,10 @@ mozc_cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
-    ] + mozc_select(
+    ] + select({
+        "//:linux_mozkey_enabled": [":mozkey_profile"],
+        "//conditions:default": [],
+    }) + mozc_select(
         default = [
             "@com_google_absl//absl/container:flat_hash_map",
             "@com_google_absl//absl/status",

@@ -915,3 +915,31 @@ A1の由来・保護とA7の資源条件を維持。A2/A3/A4/A6は専用経路�
 `//unix/fcitx5:worker_runtime_test`を追加し、軽量CIの既存SDK条件に含めた。実IME/serverを起動せず、同じfixture子プロセスのC++ static destructor中に遅延workerを復帰させ、実profile/key/peer/実exe/版検証、返却FD閉鎖、sealed受付を確認した。2親ケース成功、通常実行時の子入口1 skip。既存151成功と合わせ153成功・入口2 skip。350/3500msの両方でlate_join=1、validated_fd=1、fd_closed=1、sealed=1。390ms枠のbounded_joinは350msで1、3500msで0。後者は試験だけ終了destructorを延長してlate returnを観察し、400ms受入成功に読み替えない。
 
 `P2/run_worker_runtime_final_20261114.py`の製品build+16ターゲット成功、23.242秒、RX上限861,061 bytes、peak 6,871,781,376 bytes。新targetは実行、他15targetは対応入力digestのcacheを再利用。buildifier check・YAML/埋込shell構文・diff --check成功、actionlint未導入。実Fcitx全体の破棄順、NSS cold path/永久I/O停止/実frontendは未検証。A5と2Aを合格にせずfactory常時拒否を維持し、独立性・終了・入力保護の残件を継続する。
+
+
+### 2026-11-14 専用profile初期化・mutex/key保護と軽量CI拡張
+
+追加調査で、従来ProcessMutexがfcntl lock前にpathnameのchmod/O_TRUNCを行い、lock失敗でも既存key内容を壊し得ること、同inodeの読取りFDを閉じるとPOSIX process lockが解除されること、close後unlinkが次ownerのinodeを消し得ることを確認した。Linux Mozkey設定ONに限定して以下を修正した。
+
+- `base/mozkey_profile.{h,cc}`：全componentのNOFOLLOWと最終directoryの本人所有/0700を検証。leafだけを作成し、相対/曖昧/NUL入りpath、symlink、公開権限を変更せず拒否する。
+- `SystemUtil`：初回のprofile作成を同helperへ接続し、失敗時は空を返す。server/toolはInitMozc前に空を拒否し、logやprofile-relative fileのcwd fallbackを防ぐ。実server/toolの起動はせず、コンパイルとcomponent試験まで。
+- `ProcessMutex`：0600・本人所有regular・nlink=1のfileをNOFOLLOW/NONBLOCK/CLOEXECで開き、OFD lock取得後にだけtruncate/writeする。読取りFDのcloseでlockを失わず、unlockはinodeを残す。旧0400・symlink/hardlink/FIFO/public fileは変更せず失敗。設定OFFの従来経路は維持する。
+- staging/通知：local BSD-3-Clauseの著作権表示をTHIRD_PARTY_NOTICESへ追加し、Linux helperのsourceもstagingへ含める。factory拒否とEnabled=Falseは維持。
+
+helperの7ケース、SystemUtilの1追加、mutexの4追加により、専用設定ONは17ターゲット165成功・fixture入口2 skip。実process間のlock競合で既存sentinelが不変、自己読取りFDを閉じてもlock継続、unlock後も同inode、他製品相当のsymlink先のmode/content不変を確認した。異なるUID所有の実fileや、同UIDによる能動的directory差替え、全辞書/設定のFD相対化、実server/IMEは未検証である。
+
+初回はtest用status macro不足、その後はnamespace衝突でcompile失敗したため修正した。`run_private_profile_v2_20261114.py`は17テスト全成功だがtoolのSystemUtil include不足で製品build失敗となり、全体成功とは扱わない。includeを修正した`P2/run_private_profile_final_20261114.py`は製品stage_inputsと17ターゲット全成功（29.266秒、RX上限187,535 bytes、peak 6,967,713,792 bytes）。新規mutexケースは実行、他16ターゲットは同入力のcache。前段の17ターゲット実行結果も保持する。
+
+共通profile初期化の変更によりBazelが一部の生成tool、辞書dataset、server/Qt toolの依存buildを再実行した。新規辞書/モデル入力の取得や切替はなく、再生成datasetのSHA-256は旧stagingと一致（`cb6dd997820abe119a91403f64f07cd40c2de5d0cf70403349e21def8f8dd316`）。既存成果物・cacheを削除して再構築したものではない。全runをjobs=2、repository取得禁止で実施しworkspaceは7GiB未満、新規取得2GiBの制限内。
+
+`P2/run_private_profile_off_v2_20261114.py`で専用設定OFFの既存6ターゲット61ケース成功（29.293秒、RX上限253,418 bytes）。構成別のxml集計を`resume-private-profile-off-20261114-test-summary.json`へ保存し、ON stagingに戻す確認と区別する。Windows/macOS/AndroidフルCIは実行していない。
+
+軽量CIは既存OFF6を維持し、SDK不要のON5（mozkey_profile/system_util/process_mutex/ipc_path_manager/worker_runtime）を追加した。XDG_CONFIG_HOMEはrunner一時領域に限定。SDKがある場合だけ別のFcitx5境界9ターゲットを実行する。SDKなしでも新しいprofile/lock/worker試験は省略しない。Bazel cqueryで当該5ターゲットの依存2523 labelにFcitx5 repository・辞書dataset・server/packageを含まないことを確認（`resume-private-profile-graph-v2-20261114-summary.json`）。
+
+この依存解析のescalated実行は自動承認レビューのtimeoutで拒否され、危険と判定されたものではない。通常sandboxの初回はBazel自身のnetwork profilerが解析前にNullPointerExceptionとなったため、ローカルの解析コマンドだけ`--experimental_collect_system_network_usage=false`とし、sandbox内で再実行して成功した（7.328秒）。CI/製品の設定やシステムnetwork設定を変更せず、新規tool導入もない。
+
+新しいworkflowのYAML/埋込shell、staging Python AST、buildifier、diff --checkを確認。元worktreeの差分hashと76資産hash/cache存在は全一致（`resume-private-profile-protection-20261114.json`）。actionlint/clang-formatは未導入で未実行。実API SDK不足時のnoticeと、実際のGitHub CI結果は区別してpush後に確認する。profile/mutexの共通コード変更により同一SHAの全6系統フルCIが必要だが、dispatch tool/gh/token不足で未実行・未検証のままである。
+
+A1の来歴/通知とA7の保護/資源制限を維持し、A2のprivate profile/keyを追加検証した。A3の製品buildと導入禁止staging、A4の限定UI/API、A6の限定回帰は部分実施。A5はqueue満杯時の順序、保留入力の救済/終了保全、専用serverの非同期起動・終了所有等が未達。factory常時拒否・2A未完了・2B移行不可を維持し、工程間レビューでは停止せず次の独立実装へ継続する。
+
+ON staging構成への復元確認は`P2/run_private_profile_staging_20261114.py`で成功（13.756秒、RX上限58,728 bytes、全17テストは対応cacheを再利用）。ON165成功・入口2 skip、OFF61成功の構成別集計を各JSONへ分離して保存した。元資産の照合後も、実IME/実server起動と次Phaseへの進行は行っていない。

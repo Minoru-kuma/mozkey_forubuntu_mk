@@ -44,6 +44,9 @@
 #include "base/strings/pfchar.h"
 #include "base/system_util.h"
 #include "base/vlog.h"
+#ifdef MOZKEY_LINUX_BUILD
+#include "base/mozkey_profile.h"
+#endif
 
 #ifdef _WIN32
 #include <wil/resource.h>
@@ -186,25 +189,43 @@ class FileLockManager {
     }
 
     const pfstring pf_filename = to_pfstring(filename);
+#ifdef MOZKEY_LINUX_BUILD
+    // No pathname chmod/truncation before ownership is established. OFD locks
+    // are not lost when another descriptor for the inode is rejected/closed.
+    const int fd = OpenMozkeyLockFile(pf_filename);
+#else
     chmod(pf_filename.c_str(), 0600);  // write temporary
     const int fd =
         ::open(pf_filename.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+#endif
     if (fd < 0) {
       return absl::ErrnoToStatus(errno, "open() failed");
     }
 
-    struct flock command;
+    struct flock command{};
     command.l_type = F_WRLCK;
     command.l_whence = SEEK_SET;
     command.l_start = 0;
     command.l_len = 0;
 
-    const int result = ::fcntl(fd, F_SETLK, &command);
+    const int result = ::fcntl(fd,
+#ifdef MOZKEY_LINUX_BUILD
+                               F_OFD_SETLK,
+#else
+                               F_SETLK,
+#endif
+                               &command);
     if (result < 0) {  // failed
       ::close(fd);
       return absl::FailedPreconditionError(
           "Already locked. Another server is already running?");
     }
+#ifdef MOZKEY_LINUX_BUILD
+    if (ftruncate(fd, 0)) {
+      const int error = errno; ::close(fd);
+      return absl::ErrnoToStatus(error, "ftruncate() failed");
+    }
+#endif
 
     fdmap_.emplace(filename, fd);
     return fd;
@@ -218,7 +239,11 @@ class FileLockManager {
           absl::StrCat(filename, " is not locked"));
     }
     ::close(node.mapped());
+#ifndef MOZKEY_LINUX_BUILD
     FileUtil::UnlinkOrLogError(filename);
+#endif
+    // Mozkey keeps a stable private inode: unlinking after close lets a third
+    // process create a new lock while a contender still holds the old inode.
     return absl::OkStatus();
   }
 
@@ -251,14 +276,20 @@ bool ProcessMutex::LockAndWriteInternal(const absl::string_view message) {
   if (!message.empty()) {
     if (write(*status_or_fd, message.data(), message.size()) !=
         message.size()) {
+#ifdef MOZKEY_LINUX_BUILD
+      LOG(ERROR) << "Cannot write Mozkey lock file";
+#else
       LOG(ERROR) << "Cannot write message: " << message;
+#endif
       UnLockInternal();
       return false;
     }
   }
 
-  // changed it to read only mode.
+#ifndef MOZKEY_LINUX_BUILD
+  // Changed it to read only mode (legacy products).
   chmod(filename_.c_str(), 0400);
+#endif
   return true;
 }
 

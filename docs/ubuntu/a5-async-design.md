@@ -196,3 +196,12 @@ composeは[Instance 5.1.19](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/
 新規worker_runtime_testは同じfixtureバイナリのみをposix_spawnする。実Instance/addon/IME/serverは起動しない。workerを350/3500ms止め、通常待機を一度超過させた後、制御したC++ static destructor内で所有者破棄を通知する。値所有endpointで実SystemUtil getter、profile/key protobuf parse、SO_PEERCRED・PID/実exe・版の検証を行い、取消済みworkerが返した検証済みFDを閉じることと受付sealの維持を確認する。application requestは送らない。
 
 350msでは390msの待機枠でjoinし、3500msでは未回収を返す。後者は試験のstatic destructorだけを意図的に延長して遅い復帰を観察し、最終join/FD閉鎖を検査する。**この延長は製品仕様ではなく、通常終了400msの合格証拠ではない。** 全Fcitx5の終了順序、永久D状態、NSS cold path、実frontendは未検証でありfactory拒否を維持する。
+
+
+## 2026-11-14 専用profileとlock/key更新の保護
+
+Linux Mozkey設定ONだけで、profile作成とlock/keyファイルをFD相対に検証する`base/mozkey_profile`を追加した。profileは絶対パス、全componentのNOFOLLOW、本人所有の最終0700 directoryを要求し、作成はleaf一個だけに限定する。symlink経由の別ディレクトリ作成や、既存公開権限の自動修復はしない。SystemUtilの初回profile準備は失敗時に空を返し、server/toolはInitMozcのlog/設定I/Oより前に終了する。addonの準備workerも空profileを拒否し、cwdや他製品profileへfallbackしない。
+
+専用ProcessMutexは、private parent下の本人所有・regular・single-link・0600ファイルだけをNOFOLLOW/NONBLOCK/CLOEXECで開く。pathnameのchmodやO_TRUNCをlock取得前に行わない。Linux OFD lock取得後にだけtruncate/writeし、別の読取りFDを閉じても所有lockを失わない。unlockではinodeを残し、close後unlinkの競合による複数owner成立を避ける。残存ファイルの存在だけでserver稼働を判定せず、kernel lock/検証済みpeerを使う。0400の旧試験由来ファイルは自動chmod/削除せず拒否する。既存のPhase資産や他IMEファイルを移行・変更しない。
+
+この処理は準備workerと独立server/toolのstartupで行い、Fcitx入力loopから同期実行しない。設定OFFとWindows/macOSの従来経路は維持する。一般の全辞書/設定I/OをFD相対に再設計したわけではなく、同UIDによる能動的directory差替え、全実行経路と実server終了・実共存は引き続き未検証。A2/A5全体の合格にはしない。

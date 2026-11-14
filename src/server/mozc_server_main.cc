@@ -31,8 +31,15 @@
 #include "base/win32/winmain.h"
 #endif  // _WIN32
 #include "server/mozc_server.h"
+#ifdef MOZKEY_LINUX_BUILD
+#include "base/system_util.h"
+#endif
 
 int main(int argc, char* argv[]) {
+#ifdef MOZKEY_LINUX_BUILD
+  // Refuse before InitMozc can open a log or any profile-relative file.
+  if (mozc::SystemUtil::GetUserProfileDirectory().empty()) return 1;
+#endif
   mozc::server::InitMozcAndMozcServer(argv[0], &argc, &argv, false);
 
   const int return_value = mozc::server::MozcServer::Run();

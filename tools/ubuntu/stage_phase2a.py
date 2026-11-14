@@ -77,6 +77,8 @@ def stage(checkout, binary_root, output):
     for path in frontend.iterdir():
         if path.suffix in {'.cc', '.h', '.proto', '.bazel', '.map'}:
             mappings['usr/share/doc/mozkey/frontend-source/' + path.name] = path
+    for name in ('mozkey_profile.h', 'mozkey_profile.cc'):
+        mappings['usr/share/doc/mozkey/linux-source/' + name] = checkout / 'src/base' / name
     for source in mappings.values():
         if not source.is_file():
             raise ValueError(f'Missing build/source input: {source}')

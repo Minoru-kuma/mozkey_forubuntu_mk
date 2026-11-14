@@ -11,6 +11,8 @@
 
 **worker/runtime追加検証：固定依存のNoDestructor/明示shutdownを調査し、C++ static終了中の350/3500ms遅延復帰、実profile/key/peer検証、返却FD閉鎖と受付sealを隔離子プロセスで確認。計153成功・入口2 skip。3500msの終了予算超過は未回収として記録し、試験用の終了延長を400ms合格に流用しない。factory拒否・2A未完了を維持して独立性の残件も継続する。**
 
+**専用profile/lock保護：Linux ONだけのprivate/NOFOLLOW初期化とOFD lockを追加し、lock取得前の破壊的更新・別FD closeによるlock解放・unlink競合を防止。ON17ターゲット165成功（入口2 skip）、OFF6ターゲット61成功。SDK不要の軽量CIへprofile/lock/workerの5ターゲットを分離。製品buildは成功、全6系統/実IMEは未検証。A5の入力救済・server起動所有等は未達でありfactory拒否のまま継続する。**
+
 ユーザーの最新指示でA5は入力イベントループの長時間停止防止を中心に再設計。100ms/250msは参考測定値へ変更し、Fcitx5内の非同期IPCを優先する。設計・隔離PoC・故障注入と作業ブランチへの反映を承認。新受入基準は[レビュー案](docs/ubuntu/a5-async-design.md)であり、A5合格・製品統合・次工程は承認しない。以下の旧数値目標・停止理由は履歴として保持する。
 
 2026-11-11にCI workflowと開発運用文書の実行方針変更・限定検証・作業ブランチへのcommit/pushを承認。通常pushは軽量、Phase完了・main統合前は全6系統フルCIとする（[CI運用](docs/ubuntu/ci-policy.md)）。A5未達・工程1停止と後続Phaseの未承認状態は維持する。
