@@ -829,6 +829,7 @@ Linux jobログでは既存6targetが全てcacheによる成功、helper/非同�
 | input_pipeline | 19 | consume前保存、keyup/modifier/time順序、focus、既知outcome、破棄/同期callback、compose/取消/失敗、Unicodeとcallback Spaceを一度だけ配送 |
 | input_recovery | 11 | private保存・別process読取り、破損/サイズ/権限/上書き拒否、終了最終タスク、予算切れ後の非保存、index失敗、表示上限 |
 | frame_translator | 4 | compose prefix/Unicode、modifier/keyup迂回、Escape/無効sequence、invalid UTF-8 |
+| async_config | 4 | 既存の専用設定ファイル・symlink/hardlink拒否・取消の回帰 |
 | response_guard | 10 | 再変換拒否、Unicode選択両方向、text/cursor/anchor変化、空replacement、範囲overflow、capability、mode/result整合、古い副作用 |
 | 合計 | 138 | 15ターゲット成功。fixture入口1 skipは親からの子process起動で別途実行されるもの |
 
@@ -866,3 +867,12 @@ Linux jobログでは既存6targetが全てcacheによる成功、helper/非同�
 | A7 資源/保護 | 今回範囲で充足 | jobs=2、60GiB/新規取得2GiB以内、元差分/76資産・旧staging保持、ホスト設定変更0 |
 
 factoryを外す条件は揃っていない。とくにqueue満杯で新キーが先にpass-throughし得る現行動作、保存に失敗したままのprocess終了、永久停止したworkerとruntime破棄、archiveの解決/容量管理、専用server非同期起動/終了所有が残る。安全性を省略せず無効のままにする。2A完了扱いと2B移行は行わず、承認済み実装の進捗・未達・実行禁止の検証を区別する。
+
+
+### 再開実装のGit反映・実CI・staging
+
+実装`14d73f127525557c5e341fdf4116f82fe024a9f9`を`origin/feat/ubuntu-phase2a`へ通常pushし、`git ls-remote`で一致を確認した。`P2/staging-14d73f127`はrevision一致/dirty=false/70ファイルで全hashを再照合。ELF/export/RPATH検査も成功。既存stagingと元差分/76資産を保持した。
+
+同じSHAの通常pushは[Lint 43541197759](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43541197759)、[Linux limited 43541197749](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43541197749)、[Zenz 43541197753](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43541197753)が全てcompleted/success。Linuxの実job logではSDK不足により実APIと製品境界がNOT EXECUTED、既存6ターゲットは成功だった。138ケースと実APIの証拠はローカル隔離環境であり、CIで同じ試験を実行したとは扱わない。フル6系統は未実行・未検証のまま。
+
+この追記は検証結果のみ。最終報告では追記HEADのpush/remote一致と、そのHEADに対応する新規staging/CI状態を確認し、上記実装SHAの成功から類推しない。
