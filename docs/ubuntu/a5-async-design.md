@@ -187,3 +187,12 @@ composeは[Instance 5.1.19](https://github.com/fcitx/fcitx5/blob/5.1.19/src/lib/
 再入の故障注入はSDK公開EventLoopInterfaceを実装した限定Defer schedulerを使う。導入済みsd-event backendは終了後のexec再実行を拒否するため、それを実frontendのnested-loop成功と読み替えない。他の通常キー・modifier/composeのCore fixtureは導入済みFcitx5の実EventLoop/InputContext/KeyEvent/forwardKeyを使い、Instanceや製品IME/serverは起動しない。
 
 未解決のqueue満杯時の新規キー通過、保存先停止時の終了保全、永久停止workerとruntime破棄、専用serverの起動/終了所有は引き続き実装課題であり、この変更でA5を合格扱いしない。16枠を増やすだけ、入力を捨てて消費扱いにする、古い要求を自動再送する、focus移動先へ保留入力を送る対処は採らない。
+
+
+## 2026-11-14 workerの遅延復帰とsupport library寿命の追加調査
+
+取得済みのSystemUtilはprofile cacheとmutexにabsl::NoDestructorを使い、IPCPathManager mapもNoDestructor。固定protobuf 34.1のShutdownDataはheap常駐で、ShutdownProtobufLibraryを明示呼出しするまで自動破棄されない。addonの対象コードから当該shutdown呼出しは見つからず、固定Abseilのlog sink集合もNoDestructorだった。従って「通常のC++終了が必ずこれらを先に破棄する」とは断定せず、実際の依存・呼出しを区別する。これだけでNSS/dlopen/全runtimeの終了安全性を証明したとは扱わない。
+
+新規worker_runtime_testは同じfixtureバイナリのみをposix_spawnする。実Instance/addon/IME/serverは起動しない。workerを350/3500ms止め、通常待機を一度超過させた後、制御したC++ static destructor内で所有者破棄を通知する。値所有endpointで実SystemUtil getter、profile/key protobuf parse、SO_PEERCRED・PID/実exe・版の検証を行い、取消済みworkerが返した検証済みFDを閉じることと受付sealの維持を確認する。application requestは送らない。
+
+350msでは390msの待機枠でjoinし、3500msでは未回収を返す。後者は試験のstatic destructorだけを意図的に延長して遅い復帰を観察し、最終join/FD閉鎖を検査する。**この延長は製品仕様ではなく、通常終了400msの合格証拠ではない。** 全Fcitx5の終了順序、永久D状態、NSS cold path、実frontendは未検証でありfactory拒否を維持する。

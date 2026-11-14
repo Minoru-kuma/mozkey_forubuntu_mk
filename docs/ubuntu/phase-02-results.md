@@ -904,3 +904,14 @@ factoryを外す条件は揃っていない。とくにqueue満杯で新キー�
 ### 継続課題
 
 A1の由来・保護とA7の資源条件を維持。A2/A3/A4/A6は専用経路・build・限定fixtureの部分実施、A5は未達。queue満杯時の順序/救済、保存不能/永久I/O時の保全とruntime終了、archiveの明示的解決/容量管理、専用serverの非同期起動・終了所有は未解決。実frontend/実serverと全6系統CIも未検証。factory常時拒否・Enabled=False、2A未完了・2B移行不可を維持し、承認範囲の独立した修正・検証を継続する。
+
+
+### 2026-11-14 worker/runtime追加検証と先行push確認
+
+入力安全性の先行修正は`47228542d2db0351947fe22b9a794495ef90afaf`としてorigin/feat/ubuntu-phase2aへpushし、git ls-remoteで一致を確認。cleanな同SHAから`P2/staging-47228542d`を作成、70ファイル・INCOMPLETE_NOT_FOR_IME_LOAD、既存stagingを保持した。実際の通常pushは[Lint 43546024038](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43546024038)、[Linux limited 43546024015](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43546024015)、[Zenz 43546024003](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/43546024003)が全てcompleted/success。同SHAのフル6系統成功ではない。
+
+停止せず、取得済みSystemUtil/IPCPathManager/protobuf 34.1/Abseilのglobal寿命を静的調査した。profile cache/mutex/map/log sink集合はNoDestructor、protobuf ShutdownDataはheap常駐で明示shutdown時のみ破棄される。元の「runtime破棄と競合し得る」は未証明リスクとして保持するが、これらが必ず通常終了で自動破棄されるとの事実は確認していない。
+
+`//unix/fcitx5:worker_runtime_test`を追加し、軽量CIの既存SDK条件に含めた。実IME/serverを起動せず、同じfixture子プロセスのC++ static destructor中に遅延workerを復帰させ、実profile/key/peer/実exe/版検証、返却FD閉鎖、sealed受付を確認した。2親ケース成功、通常実行時の子入口1 skip。既存151成功と合わせ153成功・入口2 skip。350/3500msの両方でlate_join=1、validated_fd=1、fd_closed=1、sealed=1。390ms枠のbounded_joinは350msで1、3500msで0。後者は試験だけ終了destructorを延長してlate returnを観察し、400ms受入成功に読み替えない。
+
+`P2/run_worker_runtime_final_20261114.py`の製品build+16ターゲット成功、23.242秒、RX上限861,061 bytes、peak 6,871,781,376 bytes。新targetは実行、他15targetは対応入力digestのcacheを再利用。buildifier check・YAML/埋込shell構文・diff --check成功、actionlint未導入。実Fcitx全体の破棄順、NSS cold path/永久I/O停止/実frontendは未検証。A5と2Aを合格にせずfactory常時拒否を維持し、独立性・終了・入力保護の残件を継続する。
