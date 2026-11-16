@@ -987,3 +987,20 @@ PID番号偽装と未対応注入はprobeだけのlink-time getsockopt wrapで�
 軽量Linux workflowは合成子probeを毎回実行する。SDK/辞書/server/package不要、installed g++/glibcだけを用い新規依存取得はしない。SO_PEERPIDFD/pidfs未対応kernelでは管理要求は未実行noticeを出し拒否経路だけを確認する。Ubuntu 24.04 CIを26.04実入力の合格へ流用しない。buildifier、YAML/Python/埋込shell構文、diff --checkを実施。actionlint/clang-formatは未導入・未実行。全6系統CIはdispatch tool/gh/token不足により未実行・未検証のまま。
 
 A1来歴/通知とA7の保護・資源条件を維持。A2/A3/A4/A6は部分実施、A5は未達。専用serverの自動起動scopeと実接続準備への統合、既存server/foreign key時の安全なfail-closed判別、終了時の順序/残予算接続、queue満杯時の入力順序・保留入力救済/終了保全、実frontend/実server、全6系統CIが残る。factoryを有効化せず2A未完了・2B移行不可を維持し、承認済み独立作業を継続する。最終commitの新規導入禁止stagingは`P2/staging-<SHA先頭9桁>`へ作り、manifestのrevision/dirty=false/NODELETE/exportを確認する。旧stagingは保持する。
+
+
+## 2026-11-16継続：最終jobと子の終了順序
+
+前段`78fd820a4dcd18e22544146a201e5306b3a8fe90`を同じ作業ブランチへcommit/pushし、ls-remoteと一致した。新規導入禁止staging `P2/staging-78fd820a4`は75ファイル、revision一致・dirty=false・NODELETE・限定export・dataset hash不変を確認した。前段SHAのGitHub CIはLint `43801253335`、Linux limited `43801253344`、Zenz `43801253380`が成功。新しい合成子probe stepの成功もjobs APIで確認した。SDK不足をnoticeで返すstepについては、step成功だけで実API実行済みへ読み替えない。
+
+`SetFinalJob`の受付seal直後にcreatorの準備workerが終了すると、子のPDEATHSIGでgraceful処理が中断される。この接続条件を、final jobより先に取得する単一RAII `ExitHold`で実装した。native workerは受付seal後もfinal jobを実行し、その後guard解放まではthread終了を保留する。追加thread/job再受付は行わない。既存のhold無しの終了契約は維持する。
+
+製品exit callbackではguardがあれば最終snapshotを先にqueueしてchild終了と並行し、childの完了/予算切れ後にguardを解放して準備workerを回収する。guard取得失敗時はchild処理の後へsnapshot登録を遅らせ、creatorを先にsealしない。待機は通常process終了だけ、child/worker/TLSの合計で390msの残予算を共有する。未回収・保存不能は未達として保持する。
+
+`owned-child-exit-order-20261116-initial.log`の合成21シナリオが成功。追加の負例exit-no-holdは約2.2msでcreatorが先行終了し、graceful marker無し。正例exit-holdは最終job完了後もcreatorが生存し、子の150ms graceful処理markerが残り、約153.7msで両方を回収した。これは順序を逆にすると期待したgraceful処理を失うことの故障注入であり、実Fcitx/実serverの通常終了400msを証明したものではない。
+
+`P2/run_child_exit_order_build_20261116.py`で製品stage_inputsと17限定テスト成功。165成功・fixture入口2 skip、変更入力に応じて8ターゲットを実行し9ターゲットはcache再利用。109.380秒、RX上限1,032,678 bytes、workspace peak 7,092,113,408 bytes。jobs=2・取得禁止・既存cacheを維持した。新しい100ms/250ms閾値は導入せず、数値超過だけで独立工程を停止しない。
+
+専用serverの自動起動scope/既存keyとの境界、入力満杯時の順序/救済、永久I/Oとruntime終了、実frontend/実server・全6系統CIは引き続き未達・未検証。factory常時拒否、2A未完了・2B移行不可を維持して承認済み作業を継続する。
+
+実SDKの既存`run_fcitx5_api_probe.py`も再実行し、Fcitx5 5.1.19でFCITX5_API_PROBE PASS（`P2/logs/fcitx5-api-child-exit-order-20261116.log`）。合成応答10/250/500/1000msでevent loop継続、live-500時のheartbeat最大遅延2.219ms、live-1000時0.531ms。350msをdeferで同期待機する負例のlagは350.038ms。3500ms worker停止では終了待ち約390.1ms・未回収を確認し、合格へ読み替えない。実製品IME/Instance/serverは起動せず、合成frontendと実ライブラリAPIに限定する。元差分/76資産/cache保持、buildifierとPython/YAML/diff検査も確認した。

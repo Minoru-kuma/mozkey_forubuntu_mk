@@ -112,6 +112,7 @@ mozc_cc_library(
         ":mozc_ipc_client",
         ":response_guard",
         ":surrounding_text_util",
+        "//base:owned_child",
         "//base:port",
         "//base:run_level",
         "//base:util",

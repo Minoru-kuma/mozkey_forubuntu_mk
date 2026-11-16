@@ -165,7 +165,7 @@ class MozcEngine final : public InputMethodEngineV2 {
   Menu toolMenu_;
   MozcEngineConfig config_;
   bool deactivating_ = false;
-  bool shutdownJoined_ = false, shutdownSnapshotDurable_ = false;
+  bool shutdownJoined_ = false, shutdownChildJoined_ = false, shutdownSnapshotDurable_ = false;
 
 
 };

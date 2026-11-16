@@ -222,7 +222,7 @@ Linux Mozkey設定ONだけで、profile作成とlock/keyファイルをFD相対�
 | 所有・取消 | UI側は値だけの取消flagとeventfd wakeを使い待機しない。wrapper破棄も取消だけ。joinable native supervisorを別のprocess rootが1本所有し、準備workerの3500ms停止中も所有pidfdのsignal/回収を進める。detach、unbounded pool、SIGCHLD handlerの変更、subreaper変更、waitpid(-1)を製品で使わない |
 | graceful終了 | 既に製品/profile/実行画像/版の検査を終えた接続から、所有子と同じUID/PID・Mozkey抽象addressだけをコピーする。さらに接続のSO_PEERPIDFDと生存中の所有pidfdのpidfs device/inodeを照合し、取消時の再接続でも同じ照合を行って有限長の管理要求だけを送る。PID番号一致だけで送らない。SO_PEERPIDFD/pidfsが利用できなければ管理要求を拒否し、所有pidfd以外を終了しない。300ms後に所有pidfdへTERM、さらに50ms後にKILL。管理要求未設定/peer不一致なら他peerへ送らず所有子だけを終了する |
 | 終了回収 | pidfdのreadableを確認してwaitid(P_PIDFD,WNOHANG)だけで回収する。他のreaper/自動回収によるECHILDは「自分で回収した」と記録しない。所有slotは終端を確認するまで保持する |
-| unload/通常終了 | addonにはELF NODELETEを付け、stagingで必須検査する。ただし実AddonManagerの終了成功証拠ではない。実プロセス終了では子の取消/回収を開始し、合計390msの残予算だけでchild supervisorと準備workerを回収する。**所有子の終了より前にcreatorである準備workerを終了するとPDEATHSIGで子が即時終了するため、graceful終了を完了/打切りしてから準備workerをsealする順序が必要**。focus移動/IME切替には終了待ちを使わない |
+| unload/通常終了 | addonにはELF NODELETEを付け、stagingで必須検査する。ただし実AddonManagerの終了成功証拠ではない。実プロセス終了では子の取消/回収を開始し、合計390msの残予算だけでchild supervisorと準備workerを回収する。**所有子の終了より前にcreatorである準備workerを終了するとPDEATHSIGで子が即時終了するため、受付seal/最終jobとnative thread終了を分離し、graceful終了を完了/打切りするまでcreatorのnative終了を保留する順序が必要**。focus移動/IME切替には終了待ちを使わない |
 
 native supervisorは制御eventfd（process寿命で1個）、子pidfdとnonblocking socketだけを保持し、regular fileを閉じる処理も準備worker側へ置く。通常終了のjoinが失敗した場合は未回収として報告し、rootを捨てたり新しいthreadで代替したりしない。
 
@@ -231,3 +231,12 @@ native supervisorは制御eventfd（process寿命で1個）、子pidfdとnonbloc
 検証は実serverを使用しない合成ELFのみ。試験Pythonだけをsubreaperにした親死亡試験は、製品でsubreaperを変更する設計ではない。模擬shutdown文字列は実protocol互換性の証拠ではない。実serverの起動/終了要求、接続検証とのretry境界、frontendの所有scope、実Fcitxの終了順序は後続の承認済み2A作業として残る。満杯時の入力順序・保留入力救済/終了保全・実frontend・全6系統CIも未達で、A5/2Aを合格にしない。
 
 識別方法の根拠として、Linux v6.12の[SO_PEERPIDFD実装](https://github.com/torvalds/linux/blob/v6.12/net/core/sock.c)と[pidfsのprocess固有inode](https://github.com/torvalds/linux/blob/v6.12/fs/pidfs.c)を静的確認した。古いanon_inodeの共有inodeを識別に使わず、所有descriptorをStateの寿命まで保持する。実際のPID再利用を強制する試験は未実施で、probeのリンク時wrapによるSO_PEERCRED番号偽装と、実SO_PEERPIDFDの不一致を組み合わせた故障注入である。
+
+
+### 最終snapshotとcreator終了の接続（2026-11-16追検証）
+
+`PreparationWorker::HoldProcessExit`は実プロセス終了時だけ使う単一RAII guardとする。final job登録より前に取得し、受付をsealした後もfinal jobは実行するが、guardの解放までnative threadを終了しない。guard自体はthreadを作らず、追加job/再起動も許可しない。childの終了/取消回収が完了または予算切れになった後にguardを解放し、準備workerのTLSまで残予算でtryjoinする。
+
+製品のexit callbackへ接続し、childと準備workerに合計390msだけを割り当てる。guardを取得できない場合は、子の終了処理が終わるまでfinal jobを登録せず、creatorを先にsealしない。focus/IME切替/unloadには当該待機を追加しない。snapshot失敗/未回収は従来どおり未達であり、400ms成功へ読み替えない。
+
+合成ELFの150ms graceful処理と最終jobを併走させた正例では双方完了、約154msでchild/creatorを回収した。guardを省いてcreatorを先に終了させた負例では、PDEATHSIGで子が終了しgraceful完了markerが残らない。これで終了順序の必要性を確認したが、実serverのprotocol/保存処理や実Fcitxのexit callback全体は未実行である。結果末尾と`owned-child-exit-order-20261116-initial.log`を参照。

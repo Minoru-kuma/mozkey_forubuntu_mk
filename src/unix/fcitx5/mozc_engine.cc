@@ -52,6 +52,7 @@
 #include "unix/fcitx5/mozc_response_parser.h"
 #include "unix/fcitx5/mozc_state.h"
 #include "unix/fcitx5/input_recovery.h"
+#include "base/owned_child.h"
 
 namespace fcitx {
 
@@ -203,6 +204,14 @@ MozcEngine::MozcEngine(Instance* instance)
 
   exitHandle_ = instance_->eventLoop().addExitEvent([this](EventSource*) {
     const auto exitBegin = std::chrono::steady_clock::now();
+    const auto remaining = [&] {
+      return std::chrono::milliseconds(390)-std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now()-exitBegin);
+    };
+    // A final snapshot may seal the worker, but it is also the child creator:
+    // keep it alive until the child's graceful phase completes or times out.
+    // Acquire before any final job. No hold is taken for focus/switch/unload.
+    auto creatorHold = mozc::fcitx5::PreparationWorker::HoldProcessExit();
     configIo_.reset(); recoveryIo_.reset();
     for (auto* state : states_) state->Shutdown();
     if (client_) client_->Cancel();
@@ -213,14 +222,16 @@ MozcEngine::MozcEngine(Instance* instance)
           !record->delivering && !record->outcome;
     }), records.end());
     std::shared_ptr<mozc::fcitx5::InputRecovery::ExitSave> snapshot;
-    if (!records.empty()) {
-      snapshot = mozc::fcitx5::InputRecovery::QueueForExit(
+    const auto queueSnapshot = [&] {
+      if (!records.empty()) snapshot = mozc::fcitx5::InputRecovery::QueueForExit(
           StandardPath::global().userDirectory(StandardPath::Type::PkgConfig),
           "held-" + std::to_string(getpid()) + "-" + std::to_string(now(CLOCK_MONOTONIC)) + ".snapshot", records);
-    }
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now()-exitBegin);
-    shutdownJoined_ = mozc::fcitx5::PreparationWorker::WaitForProcessExit(std::chrono::milliseconds(390)-elapsed);
+    };
+    if (creatorHold) queueSnapshot();  // May run concurrently with child exit.
+    shutdownChildJoined_ = mozc::OwnedChild::WaitForProcessExit(remaining());
+    if (!creatorHold) queueSnapshot();  // Do not seal a creator prematurely.
+    creatorHold.reset();
+    shutdownJoined_ = mozc::fcitx5::PreparationWorker::WaitForProcessExit(remaining());
     shutdownSnapshotDurable_ = !snapshot || (snapshot->queued && snapshot->durable.load());
     return true;
   });

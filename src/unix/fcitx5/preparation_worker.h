@@ -31,6 +31,21 @@ class PreparationWorker {
   int TakeFd();  // Caller owns the result; still check IC/epoch before applying.
   void Cancel();  // Never waits; idempotent, also closes an unclaimed result.
   static bool Busy();
+  // Actual process termination only. Keep this child-creator thread alive
+  // while an owned child's graceful shutdown is in progress. The final value-
+  // only job may still run; admission stays sealed. Acquire BEFORE SetFinalJob,
+  // release after child collection/timeout, then join with the REMAINING budget.
+  // Holding this guard never starts a thread or waits for a child.
+  class ExitHold {
+   public:
+    ~ExitHold();
+    ExitHold(const ExitHold&) = delete;
+    ExitHold& operator=(const ExitHold&) = delete;
+   private:
+    friend class PreparationWorker;
+    ExitHold() = default;
+  };
+  static std::unique_ptr<ExitHold> HoldProcessExit();
   // Actual process shutdown only. Seal admission and own ONE final value-only
   // job after any in-flight job. No UI/IC/loop capture; no new helper/thread pool.
   static bool SetFinalJob(Job job);

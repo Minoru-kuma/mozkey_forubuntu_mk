@@ -34,7 +34,8 @@ with tempfile.TemporaryDirectory(prefix='mozkey-owned-child-') as directory:
     for mode in ('normal', 'startup350', 'cancel-before-spawn350', 'ignore-term',
                  'graceful', 'stall-shutdown', 'wrong-peer', 'spoof-peer', 'legacy-peer',
                  'duplicate', 'bad-env', 'symlink',
-                 'public-image', 'drop-handle', 'auto-reap', 'retained-worker'):
+                 'public-image', 'drop-handle', 'auto-reap', 'retained-worker',
+                 'exit-no-hold', 'exit-hold'):
         profile = work / mode
         profile.mkdir(mode=0o700)
         executable = link if mode == 'symlink' else public if mode == 'public-image' else fixture

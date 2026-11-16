@@ -126,6 +126,8 @@ int main(int argc, char* argv[]) {
   if (mode == "startup350") spec.arguments.push_back("--delay350");
   if (mode == "graceful" || mode == "legacy-peer") spec.arguments.push_back("--socket");
   if (mode == "stall-shutdown") spec.arguments.push_back("--stall-shutdown");
+  const bool exit_order = mode == "exit-hold" || mode == "exit-no-hold";
+  if (exit_order) spec.arguments.push_back("--shutdown-delay150");
   const auto beginning = Clock::now();
   auto worker = PreparationWorker::Start([spec, flag, result, mode](const std::atomic<bool>&) {
     if (mode == "cancel-before-spawn350") std::this_thread::sleep_for(350ms);
@@ -170,7 +172,7 @@ int main(int argc, char* argv[]) {
       }
       ok = PumpUntil([&] { return access((profile+"/.fixture-release").c_str(), F_OK) == 0; }, 5s, &ticks) && ok;
     }
-    if (mode == "graceful" || mode == "stall-shutdown" || mode == "legacy-peer") {
+    if (mode == "graceful" || mode == "stall-shutdown" || mode == "legacy-peer" || exit_order) {
       const int fd = Connect(child->pid());
       if (mode == "legacy-peer") deny_peer_pidfd.store(true);
       const bool configured = fd >= 0 && child->ConfigureShutdownFromVerifiedConnection(fd, "quit\n");
@@ -178,6 +180,37 @@ int main(int argc, char* argv[]) {
       deny_peer_pidfd.store(false);
       if (!peer_identity) printf("::notice::Kernel peer pidfd/pidfs identity unavailable; graceful request NOT EXECUTED, PID-only fallback rejected\n");
       if (fd >= 0) close(fd);
+    }
+    if (exit_order) {
+      const auto begin = Clock::now();
+      std::unique_ptr<PreparationWorker::ExitHold> hold;
+      if (mode == "exit-hold") {
+        hold = PreparationWorker::HoldProcessExit();
+        ok = bool(hold) && !PreparationWorker::HoldProcessExit() && ok;
+      }
+      auto final_done = std::make_shared<std::atomic<bool>>(false);
+      ok = PreparationWorker::SetFinalJob([final_done](const auto&) {
+        final_done->store(true); return -1;
+      }) && ok;
+      ok = PumpUntil([&] { return final_done->load(); }, 50ms) && ok;
+      bool creator_joined_early = false;
+      if (mode == "exit-no-hold") creator_joined_early = PreparationWorker::WaitForProcessExit(50ms);
+      child->Cancel();
+      const auto remaining = [&] {
+        return 390ms-std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-begin);
+      };
+      const bool collected = OwnedChild::WaitForProcessExit(remaining());
+      hold.reset();
+      const bool creator_joined = PreparationWorker::WaitForProcessExit(remaining());
+      const bool marker = access((profile+"/.fixture-shutdown").c_str(), F_OK) == 0;
+      ok = collected && creator_joined && final_done->load() && child->reaped_by_owner() && ok;
+      ok = marker == (peer_identity && mode == "exit-hold") && ok;
+      if (mode == "exit-no-hold") ok = creator_joined_early && ok;
+      const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-begin).count();
+      printf("OWNED_CHILD_EXIT_ORDER mode=%s pass=%d final_done=%d child_join=%d creator_join=%d early_creator_join=%d graceful_marker=%d peer_identity=%d total_us=%ld\n",
+             mode.c_str(), ok, final_done->load(), collected, creator_joined,
+             creator_joined_early, marker, peer_identity, duration);
+      return ok ? 0 : 1;
     }
     if (mode == "spoof-peer") ok = RejectSpoofedPeer(child) && ok;
     if (mode == "wrong-peer") {

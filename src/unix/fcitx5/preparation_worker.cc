@@ -33,6 +33,7 @@ struct PreparationWorker::Root {
   std::condition_variable ready;
   std::shared_ptr<State> slot;
   bool pending = false;
+  unsigned exit_holds = 0;  // Protected by mutex; final jobs may run while held.
   std::atomic<bool> sealed{false};
   pthread_t worker{};  // Root owns this joinable Linux thread until tryjoin succeeds.
   std::atomic<bool> started{false};
@@ -52,7 +53,9 @@ struct PreparationWorker::Root {
         Job final;
         {
           std::unique_lock lock(mutex);
-          ready.wait(lock, [this] { return pending || sealed.load(); });
+          ready.wait(lock, [this] {
+            return pending || (sealed.load() && (final_job || !exit_holds));
+          });
           if (!pending) {
             if (!final_job) return;  // Sealed and drained: includes TLS exit.
             final = std::move(final_job); final_job = {};
@@ -133,6 +136,22 @@ bool PreparationWorker::Busy() {
   if (root.slot && !root.slot->done.load()) return true;
   root.slot.reset();
   return false;
+}
+std::unique_ptr<PreparationWorker::ExitHold> PreparationWorker::HoldProcessExit() {
+  auto& root = ProcessRoot();
+  std::unique_lock lock(root.mutex, std::try_to_lock);
+  if (!lock.owns_lock() || root.sealed.load() || root.exit_holds) return {};
+  auto hold = std::unique_ptr<ExitHold>(new ExitHold);
+  ++root.exit_holds;
+  return hold;
+}
+PreparationWorker::ExitHold::~ExitHold() {
+  auto& root = ProcessRoot();
+  {
+    std::lock_guard lock(root.mutex);
+    --root.exit_holds;
+  }
+  root.ready.notify_one();
 }
 bool PreparationWorker::SetFinalJob(Job job) {
   auto& root = ProcessRoot();

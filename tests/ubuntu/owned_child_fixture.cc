@@ -20,6 +20,7 @@ int main(int argc, char* argv[]) {
   if (!mozc::InitializeOwnedChild(&argc, argv, &profile) || profile.empty()) return 10;
   bool socket_mode = false;
   bool stall_shutdown = false;
+  bool delay_shutdown = false;
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg(argv[i]);
     if (arg.starts_with("--mozkey-owned-")) return 15;
@@ -27,6 +28,7 @@ int main(int argc, char* argv[]) {
     if (arg == "--delay350") std::this_thread::sleep_for(std::chrono::milliseconds(350));
     if (arg == "--socket") socket_mode = true;
     if (arg == "--stall-shutdown") { socket_mode = true; stall_shutdown = true; signal(SIGTERM, SIG_IGN); }
+    if (arg == "--shutdown-delay150") { socket_mode = true; delay_shutdown = true; }
   }
   int listener = -1;
   if (socket_mode) {
@@ -53,6 +55,7 @@ int main(int argc, char* argv[]) {
     const auto size = read(fd, request, sizeof(request));
     if (size == 5 && memcmp(request, "quit\n", 5) == 0) {
       if (stall_shutdown) { for (;;) pause(); }
+      if (delay_shutdown) std::this_thread::sleep_for(std::chrono::milliseconds(150));
       const int marker = open((profile+"/.fixture-shutdown").c_str(),
                               O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
       if (marker < 0) return 14;
