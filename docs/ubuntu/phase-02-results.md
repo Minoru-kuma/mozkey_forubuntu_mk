@@ -943,3 +943,47 @@ helperの7ケース、SystemUtilの1追加、mutexの4追加により、専用�
 A1の来歴/通知とA7の保護/資源制限を維持し、A2のprivate profile/keyを追加検証した。A3の製品buildと導入禁止staging、A4の限定UI/API、A6の限定回帰は部分実施。A5はqueue満杯時の順序、保留入力の救済/終了保全、専用serverの非同期起動・終了所有等が未達。factory常時拒否・2A未完了・2B移行不可を維持し、工程間レビューでは停止せず次の独立実装へ継続する。
 
 ON staging構成への復元確認は`P2/run_private_profile_staging_20261114.py`で成功（13.756秒、RX上限58,728 bytes、全17テストは対応cacheを再利用）。ON165成功・入口2 skip、OFF61成功の構成別集計を各JSONへ分離して保存した。元資産の照合後も、実IME/実server起動と次Phaseへの進行は行っていない。
+
+
+## 2026-11-16継続：専用子のpidfd所有と独立回収
+
+再開基点は`a472ff2d915e5c879b4d51c24c40a41fea24c89a`、既存`feat/ubuntu-phase2a`を継続。mainをGitHub APIで再確認し`b489fca1561bf12ff6b43205378220163d71c21c`。開始時は前回作業からの未追跡`src/base/owned_child.{h,cc}`だけがあり、それを保持して仕上げた。元worktreeのステージ済み/未ステージ差分hash、76資産hashとcache存在は全一致（`P2/logs/resume-owned-child-protection-20261116.json`）。実IME/server/toolの起動・導入、Hazkey/システム設定、sudo/apt、次Phase、main統合は行わない。
+
+前回SHAのGitHub ActionsはLint `43556106282`、Linux limited `43556106399`、Zenz `43556106257`の3系統が成功した。これは今回変更の成功へ流用しない。全6系統は引き続き未実行・未検証。
+
+### 実装と境界
+
+- Linux x86_64・専用設定ONだけの`//base:owned_child`を追加。標準glibc pidfd_spawn、検査済み画像FDからのexec、private `.launch.lock`のOFD lease継承でprocess root間の重複起動を拒否する。環境は明示allowlistだけ、stdin/out/errはdevnull、child FD3/4以外の余分なFDはclosefrom。独自fork/child内C++起動処理、PATH/他製品fallback、PID番号でのsignal送信は使わない。
+- process rootはjoinable native supervisorを1本所有する。準備workerが止まっていても、取消flag/eventfdを受けて所有pidfdだけをTERM/KILLし、waitid(P_PIDFD,WNOHANG)で回収する。wrapper破棄は待機しない。SIGCHLD handler/subreaperを製品で変更せず、他のreaperによるECHILDを自分の回収成功と記録しない。
+- 管理要求の送信は、既に製品/profile/実行画像/版を検査した接続に限定する契約。UID/PID/prefixに加えSO_PEERPIDFDと生存中の所有pidfdをpidfs device/inodeで照合し、再接続時も照合する。PID再利用で別peerへ送らない。kernelに識別機能がなければ管理要求を拒否し、PID番号だけへのfallbackは行わない。通常grace300ms→TERM→50ms→KILLは所有子にだけ適用。
+- 専用server入口はInitMozc/profile/logより先にbootstrap引数・parent・PDEATHSIG・検査済み画像inode・継承lease/OFD所有を検証する。成功した所有起動引数を通常flags parserへ渡す前に除去する。普通の起動は従来のprivate profile guardを維持。frontendからの自動Spawn/終了scopeは未接続。
+- addonにELF NODELETEを付与し、staging時の必須検査とmanifestへ追加した。新しいLinux helper sourceも同梱する。factory常時拒否とEnabled=Falseは維持し、実AddonManagerのunload成功とは扱わない。
+
+通常終了の合計390msはchildと準備workerの残予算を共有する設計。**creatorである準備workerを先に終了するとPDEATHSIGで子が即時終了するため、gracefulな子終了を完了/打切りした後で準備workerをsealする順序が必要**。focus/IME切替には待機を使わない。pidfd_spawn自体がexec I/Oで永久停止する場合、UIは待たず予約/leaseで増殖を防ぐが、API復帰前のpidfd移譲と完全回収は未証明。D-state、bootstrap前の親死亡、実serverの保存/終了は未検証であり、A5/400ms合格にしない。
+
+### 隔離検証
+
+`/usr/bin/python3 tests/ubuntu/run_owned_child_probe.py`はinstalled g++/glibcだけを使い、合成ELFと実PreparationWorker/OwnedChildを逐次コンパイルする。Fcitx5 Instance、実IME/server、DBus、辞書、モデル、追加toolを起動/取得しない。通常、起動350ms、起動前取消350ms、TERM無視、graceful、shutdown無応答＋TERM無視、別peer拒否、PID番号偽装peer拒否、SO_PEERPIDFD未対応注入、同root二重起動、LD_PRELOAD拒否、symlink画像拒否、public画像拒否、wrapper破棄、SIGCHLD自動回収、準備worker3500ms保持、別rootのlease競合とowner cleanup、親死亡後の回収の19シナリオが成功した（`P2/logs/owned-child-probe-20261116-v10.log`、集計`resume-owned-child-probe-20261116-summary.json`）。
+
+PID番号偽装と未対応注入はprobeだけのlink-time getsockopt wrapであり、製品に注入コードは入らない。親死亡試験では一時Python driverだけをsubreaperにし、所有孫のpidfdでSIGKILL終端とwaitid回収を観測した。Fcitx5のsubreaper設定を変える案ではない。SIGCHLD自動回収ではowned_reap=0を要求し、自分が回収したとの誤報を防ぐ。
+
+| 測定 | 実測（v10、参考） | 限界 |
+|---|---:|---|
+| 準備job受付 | 80〜168µs | cold startの単一実測。実Fcitx dispatch/表示時間ではない |
+| 通常取消→回収 | 約1.1ms | 合成ELFの正常signal応答 |
+| TERM無視 | 約51.4ms | pidfd KILLによる回収 |
+| shutdown無応答＋TERM無視 | 約354.9ms | 合成管理要求。実serverの正常終了400msの証明ではない |
+| worker3500ms停止中の取消→回収 | 約51.7ms | 回収時にPreparationWorker::Busy=true。worker復帰を待たず回収した |
+| 起動前350ms取消 | 子を生成せず終了 | 有限sleep注入であり実exec/filesystem永久停止の代替証明ではない |
+
+1ms刻みのtest harness pumpは実Fcitx5 EventLoopではない。3500ms注入試験はworkerの復帰を試験の都合で待った後にbounded joinするため、process全体が400msで終了したと解釈しない。旧100ms/250msは引き続き参考値、打鍵300ms/live500ms〜約1sの実表示は未測定。
+
+初回はglibc pidfd headerのC linkageでリンク失敗し、extern Cで宣言を包んで修正した。次の失敗は試験用ELFがumaskによってgroup writableだったため、実行画像検査が拒否したもの。fixtureだけを0700にし製品の拒否基準は維持した。中間成功v4〜v9と最終v10を区別してlogを保持する。
+
+### ビルド・軽量CI・残件
+
+最終`P2/run_owned_child_build_v2_20261116.py`で製品stage_inputsとowned_child libraryが成功。既存17テストはすべて対応入力digestのcacheを再利用し、165成功・fixture入口2 skipの既存証拠を保持した。今回再実行したと報告しない。23.934秒、RX上限178,210 bytes、workspace peak 7,044,956,160 bytes。前段buildも成功41.395秒、RX上限245,979 bytes。jobs=2・取得禁止・隔離HOME/XDG・既存repository/disk cacheを維持。新しい全件回帰や辞書/モデル取得はしない。OFF61の前回証拠は保持、今回のOFF再実行と区別する。
+
+軽量Linux workflowは合成子probeを毎回実行する。SDK/辞書/server/package不要、installed g++/glibcだけを用い新規依存取得はしない。SO_PEERPIDFD/pidfs未対応kernelでは管理要求は未実行noticeを出し拒否経路だけを確認する。Ubuntu 24.04 CIを26.04実入力の合格へ流用しない。buildifier、YAML/Python/埋込shell構文、diff --checkを実施。actionlint/clang-formatは未導入・未実行。全6系統CIはdispatch tool/gh/token不足により未実行・未検証のまま。
+
+A1来歴/通知とA7の保護・資源条件を維持。A2/A3/A4/A6は部分実施、A5は未達。専用serverの自動起動scopeと実接続準備への統合、既存server/foreign key時の安全なfail-closed判別、終了時の順序/残予算接続、queue満杯時の入力順序・保留入力救済/終了保全、実frontend/実server、全6系統CIが残る。factoryを有効化せず2A未完了・2B移行不可を維持し、承認済み独立作業を継続する。最終commitの新規導入禁止stagingは`P2/staging-<SHA先頭9桁>`へ作り、manifestのrevision/dirty=false/NODELETE/exportを確認する。旧stagingは保持する。

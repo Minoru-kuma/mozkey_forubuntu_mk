@@ -32,11 +32,16 @@
 #endif  // _WIN32
 #include "server/mozc_server.h"
 #ifdef MOZKEY_LINUX_BUILD
+#include <string>
+#include "base/owned_child.h"
 #include "base/system_util.h"
 #endif
 
 int main(int argc, char* argv[]) {
 #ifdef MOZKEY_LINUX_BUILD
+  std::string owned_profile;
+  if (!mozc::InitializeOwnedChild(&argc, argv, &owned_profile)) return 1;
+  if (!owned_profile.empty()) mozc::SystemUtil::SetUserProfileDirectory(owned_profile);
   // Refuse before InitMozc can open a log or any profile-relative file.
   if (mozc::SystemUtil::GetUserProfileDirectory().empty()) return 1;
 #endif

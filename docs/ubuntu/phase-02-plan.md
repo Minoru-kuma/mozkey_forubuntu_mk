@@ -1,5 +1,7 @@
 # Phase 2 詳細実装計画・受入条件（レビュー完了）
 
+**2026-11-16継続：専用server入口へ所有起動bootstrapを接続し、標準pidfd_spawn・private OFD lease・別native supervisor・pidfs peer照合を模擬ELFで限定検証する。自動起動経路/実server/入力救済は未完了で、factory拒否と2A未完了を維持する。工程間レビューでは停止せず承認済み独立作業を継続。最新証拠は結果末尾を参照。**
+
 **再開後（2026-11-13〜14）：worker native join/TLS、通常終了時snapshot、compose、非同期session解放、再変換の副作用guardを実装し、15ターゲット138ケースで限定検証。factory解除・2A合格は未達条件と全6系統CI未検証のため行わない。[結果](phase-02-results.md)末尾の最新判定を優先し、工程間レビュー待ちを理由に実装全体を止める扱いはしない。**
 
 **2026-11-13の継続実装：工程1〜6の一括実施と安全条件成立時のみfactory解除を承認。非同期client/session・入力journal・UI適用・設定I/Oを製品側へ接続し限定ビルド/試験/stagingを更新した。入力の救済・終了時保全、実frontend契約、worker/runtime終了等は未解決のためロード拒否を維持する。A1〜A7の判定と測定範囲は[結果](phase-02-results.md)末尾。全6系統CI成功も未確認につき2A未完了・2B移行不可。旧記述の未承認・工程間停止は過去時点の履歴。**

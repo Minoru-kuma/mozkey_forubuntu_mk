@@ -73,6 +73,10 @@ jobs:
       - name: Run event-driven IPC model PoC
         timeout-minutes: 2
         run: /usr/bin/python3 tests/ubuntu/test_async_ipc_poc.py
+      - name: Probe owned synthetic child startup, cancellation and collection
+        # Installed glibc/g++ only; no Fcitx5 SDK, product server or download.
+        timeout-minutes: 2
+        run: /usr/bin/python3 tests/ubuntu/run_owned_child_probe.py
       - name: Probe installed Fcitx5 APIs without launching an IME
         timeout-minutes: 2
         run: |

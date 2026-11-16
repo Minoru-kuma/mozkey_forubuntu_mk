@@ -13,6 +13,8 @@
 
 **専用profile/lock保護：Linux ONだけのprivate/NOFOLLOW初期化とOFD lockを追加し、lock取得前の破壊的更新・別FD closeによるlock解放・unlink競合を防止。ON17ターゲット165成功（入口2 skip）、OFF6ターゲット61成功。SDK不要の軽量CIへprofile/lock/workerの5ターゲットを分離。製品buildは成功、全6系統/実IMEは未検証。A5の入力救済・server起動所有等は未達でありfactory拒否のまま継続する。**
 
+**2026-11-16継続：Linux専用の所有子プロセス境界、専用server入口のbootstrap、addon NODELETEを追加し、模擬ELFの19シナリオで起動/取消/回収/二重起動/親死亡/peer番号偽装を検証。frontendからの自動起動は未接続、実server/IMEは未起動。A5/2Aを合格にせず、入力救済・起動所有の製品接続等の承認済み作業を継続する。**
+
 ユーザーの最新指示でA5は入力イベントループの長時間停止防止を中心に再設計。100ms/250msは参考測定値へ変更し、Fcitx5内の非同期IPCを優先する。設計・隔離PoC・故障注入と作業ブランチへの反映を承認。新受入基準は[レビュー案](docs/ubuntu/a5-async-design.md)であり、A5合格・製品統合・次工程は承認しない。以下の旧数値目標・停止理由は履歴として保持する。
 
 2026-11-11にCI workflowと開発運用文書の実行方針変更・限定検証・作業ブランチへのcommit/pushを承認。通常pushは軽量、Phase完了・main統合前は全6系統フルCIとする（[CI運用](docs/ubuntu/ci-policy.md)）。A5未達・工程1停止と後続Phaseの未承認状態は維持する。

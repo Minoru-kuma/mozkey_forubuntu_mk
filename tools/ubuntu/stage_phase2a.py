@@ -37,12 +37,15 @@ def inspect_elf(path, shared=False):
     result = {'needed': re.findall(r'\(NEEDED\).*\[(.*?)\]', dynamic),
               'runtime_search_paths': paths}
     if shared:
+        if not re.search(r'\(FLAGS_1\).*\bNODELETE\b', dynamic):
+            raise ValueError('Addon must pin native worker/reaper code with NODELETE')
         symbols = subprocess.check_output(
             ['nm', '-D', '--defined-only', str(path)], text=True)
         exports = [line.split()[-1] for line in symbols.splitlines() if line.split()]
         if exports != ['fcitx_addon_factory_instance_mozkey']:
             raise ValueError(f'Unexpected addon exports: {exports}')
         result['exports'] = exports
+        result['nodelete'] = True
     return result
 
 
@@ -77,7 +80,7 @@ def stage(checkout, binary_root, output):
     for path in frontend.iterdir():
         if path.suffix in {'.cc', '.h', '.proto', '.bazel', '.map'}:
             mappings['usr/share/doc/mozkey/frontend-source/' + path.name] = path
-    for name in ('mozkey_profile.h', 'mozkey_profile.cc'):
+    for name in ('mozkey_profile.h', 'mozkey_profile.cc', 'owned_child.h', 'owned_child.cc'):
         mappings['usr/share/doc/mozkey/linux-source/' + name] = checkout / 'src/base' / name
     for source in mappings.values():
         if not source.is_file():

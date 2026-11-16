@@ -501,6 +501,19 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "owned_child",
+    srcs = ["owned_child.cc"],
+    hdrs = ["owned_child.h"],
+    linkopts = ["-pthread"],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [":mozkey_profile"],
+)
+
+mozc_cc_library(
     name = "mozkey_profile",
     srcs = ["mozkey_profile.cc"],
     hdrs = ["mozkey_profile.h"],

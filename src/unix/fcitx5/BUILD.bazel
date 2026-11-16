@@ -175,7 +175,10 @@ mozc_cc_binary(
         "mozc_engine_factory.cc",
     ],
     additional_linker_inputs = ["exports.map"],
-    linkopts = ["-Wl,--version-script=$(location exports.map)"],
+    linkopts = [
+        "-Wl,--version-script=$(location exports.map)",
+        "-Wl,-z,nodelete",
+    ],
     linkshared = 1,
     linkstatic = 1,
     tags = ["manual"],

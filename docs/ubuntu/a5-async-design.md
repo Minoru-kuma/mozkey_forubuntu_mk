@@ -1,5 +1,7 @@
 # A5設計・暫定受入条件：イベントループの継続性
 
+**2026-11-16継続：専用serverの所有起動に向けたLinux x86_64限定`OwnedChild`を追加し、模擬ELFで起動・取消・pidfd回収を検証中。専用server入口のbootstrap検証とaddonのNODELETEを接続するが、自動起動経路はまだ接続せず、factory常時拒否を維持する。実server/IMEは起動しない。下記「専用子プロセスの所有境界」と結果末尾を参照。**
+
 **再開後の最新境界（2026-11-13〜14）：native worker join/TLS、通常終了の最終snapshot、compose保持、非同期session解放、再変換/削除guardを実装・限定検証した。工程間レビュー待ちではない。危険な機能の有効化と2A合格は、残る安全条件・実frontend/実server・全6系統CIの証拠が不足するため保留する。以下の過去記述と差がある箇所は末尾と[最新結果](phase-02-results.md)を優先する。**
 
 **2026-11-13製品側接続の現状：同期ClientFactoryをIO/Timer/Defer駆動のclient/sessionへ置換し、準備済み同一FD、キーjournal、取消・UI適用ガード、worker上の設定I/Oを接続した。18新規ケースと関連回帰、実APIの隔離試験を実施するが、実IME/serverでの成功を意味しない。入力の安全な救済と終了時保全、実keyup/反復/compose、worker/runtime終了、server起動/セッション解放が未達・未検証。factoryは引き続き常に拒否。最新判定は[実行結果](phase-02-results.md)末尾を優先し、過去の保留/停止は当時の記録として保持する。**
@@ -19,7 +21,7 @@
 
 ### 今回の実装境界
 
-`PreparationWorker`はプロセス寿命のrootがstd::threadを直接1本所有する。rootは静的破棄を行わず、コード保持はFcitx5 5.1.19のDefaultHint/PreventUnloadHintが前提。要求データとnotification FD、未移譲結果FDはjob/state自身が所有し、addon/IC/loopをcaptureしない。Cancel/owner破棄はjoinせず、停止jobがある間は追加Startを拒否する。完了時にworkerがrootのslotを解放し、取消済み結果は閉じる。正常時も接続FDの移譲は一度だけ。idle時のworkerはrootに所有されたままプロセス終了で回収される。query/終了待ちだけで新規threadは生成しない。
+`PreparationWorker`はプロセス寿命のrootがjoinable native pthreadを1本所有する。rootは静的破棄を行わず、コード保持はFcitx5 5.1.19のDefaultHint/PreventUnloadHintが前提。要求データとnotification FD、未移譲結果FDはjob/state自身が所有し、addon/IC/loopをcaptureしない。Cancel/owner破棄はjoinせず、停止jobがある間は追加Startを拒否する。完了時にworkerがrootのslotを解放し、取消済み結果は閉じる。正常時も接続FDの移譲は一度だけ。idle時のworkerはrootに所有されたままプロセス終了で回収される。query/終了待ちだけで新規threadは生成しない。
 
 `StartConnectionPreparation`は明示endpointの値コピーだけをworkerへ渡す。既存Linux専用transportの`PrepareLinuxDeadlineSocket`で、実profile/key protobuf、private権限、全祖先のsymlink拒否、製品prefix、peer UID/PID/実行パス、protocol/product版を検証し、**同じnonblocking/CLOEXEC FD**を移譲する。UI側で再接続しない。metadata検証からのTOCTOU/exec/PID再利用を全解決したとは扱わない。100ms deadlineの旧clientは診断資産として残し、通常キーから呼ばない。
 
@@ -205,3 +207,27 @@ Linux Mozkey設定ONだけで、profile作成とlock/keyファイルをFD相対�
 専用ProcessMutexは、private parent下の本人所有・regular・single-link・0600ファイルだけをNOFOLLOW/NONBLOCK/CLOEXECで開く。pathnameのchmodやO_TRUNCをlock取得前に行わない。Linux OFD lock取得後にだけtruncate/writeし、別の読取りFDを閉じても所有lockを失わない。unlockではinodeを残し、close後unlinkの競合による複数owner成立を避ける。残存ファイルの存在だけでserver稼働を判定せず、kernel lock/検証済みpeerを使う。0400の旧試験由来ファイルは自動chmod/削除せず拒否する。既存のPhase資産や他IMEファイルを移行・変更しない。
 
 この処理は準備workerと独立server/toolのstartupで行い、Fcitx入力loopから同期実行しない。設定OFFとWindows/macOSの従来経路は維持する。一般の全辞書/設定I/OをFD相対に再設計したわけではなく、同UIDによる能動的directory差替え、全実行経路と実server終了・実共存は引き続き未検証。A2/A5全体の合格にはしない。
+
+
+## 専用子プロセスの所有境界（2026-11-16）
+
+新しい常駐サービスを追加せず、既存の専用serverをFcitx5が所有する子として扱うための境界を分離する。`src/base/owned_child.{h,cc}`はLinux x86_64専用・manual/opt-inで、InputContext、addon、event loop、protobuf/NSS、ユーザー入力の参照を持たない。現段階では製品serverの入口検証だけを接続し、frontendからの自動Spawnは未接続とする。
+
+| 境界 | 契約 |
+|---|---|
+| 起動 | filesystem/exec I/Oを伴う処理は既存の単一PreparationWorker上だけで行う。標準glibcの`pidfd_spawn`を使用し、独自fork後のC++処理やPID番号でのsignal送信を行わない。失敗時にPATH探索・別製品起動・unsafe fallbackをしない |
+| 実行画像・FD | 全祖先NOFOLLOWで開いたroot/本人所有・group/other非書込・regular/単一linkのELF64 x86_64だけを実行。検査済み画像FDをchildの3へ渡し`/proc/self/fd/3`をexec、private launch leaseを4へ渡す。0/1/2は検査したdevnull、5以上はclosefromし、別addonのFDを継承しない |
+| 増殖防止 | process rootの予約は1件だけ。private profileの`.launch.lock`にOFD lockを取得し、子のFD4へ同じopen descriptionを継承する。名前をunlinkしない。別Fcitx root/再起動からの競合も拒否し、古い子が存在する間に重複起動しない |
+| 入口検証 | InitMozc・log/profile I/Oより先にparent ID、親死亡signal、private profile、FD3とself imageのinode、FD4とnamed leaseのinode/OFD所有を検証する。親を二度照合し、成功した所有起動引数は通常flags parserの前に除去する。FD3を閉じFD4へCLOEXECを設定する |
+| 所有・取消 | UI側は値だけの取消flagとeventfd wakeを使い待機しない。wrapper破棄も取消だけ。joinable native supervisorを別のprocess rootが1本所有し、準備workerの3500ms停止中も所有pidfdのsignal/回収を進める。detach、unbounded pool、SIGCHLD handlerの変更、subreaper変更、waitpid(-1)を製品で使わない |
+| graceful終了 | 既に製品/profile/実行画像/版の検査を終えた接続から、所有子と同じUID/PID・Mozkey抽象addressだけをコピーする。さらに接続のSO_PEERPIDFDと生存中の所有pidfdのpidfs device/inodeを照合し、取消時の再接続でも同じ照合を行って有限長の管理要求だけを送る。PID番号一致だけで送らない。SO_PEERPIDFD/pidfsが利用できなければ管理要求を拒否し、所有pidfd以外を終了しない。300ms後に所有pidfdへTERM、さらに50ms後にKILL。管理要求未設定/peer不一致なら他peerへ送らず所有子だけを終了する |
+| 終了回収 | pidfdのreadableを確認してwaitid(P_PIDFD,WNOHANG)だけで回収する。他のreaper/自動回収によるECHILDは「自分で回収した」と記録しない。所有slotは終端を確認するまで保持する |
+| unload/通常終了 | addonにはELF NODELETEを付け、stagingで必須検査する。ただし実AddonManagerの終了成功証拠ではない。実プロセス終了では子の取消/回収を開始し、合計390msの残予算だけでchild supervisorと準備workerを回収する。**所有子の終了より前にcreatorである準備workerを終了するとPDEATHSIGで子が即時終了するため、graceful終了を完了/打切りしてから準備workerをsealする順序が必要**。focus移動/IME切替には終了待ちを使わない |
+
+native supervisorは制御eventfd（process寿命で1個）、子pidfdとnonblocking socketだけを保持し、regular fileを閉じる処理も準備worker側へ置く。通常終了のjoinが失敗した場合は未回収として報告し、rootを捨てたり新しいthreadで代替したりしない。
+
+`pidfd_spawn`自体がexec/filesystem内で止まった場合、UIは待たないがbirth pidfdがAPIから戻る前にはsupervisorへ移譲できない。取消は論理的に記録され、予約/継承leaseで増殖を防ぐ。API復帰後に終了回収する。この永久停止と実kernel D-stateは未検証であり、400ms内の完全回収を保証したとは扱わない。bootstrap前のexec永久停止に対する親死亡後の完全回収も未証明。新しいRootで無理に起動を再試行する方式では隠さない。
+
+検証は実serverを使用しない合成ELFのみ。試験Pythonだけをsubreaperにした親死亡試験は、製品でsubreaperを変更する設計ではない。模擬shutdown文字列は実protocol互換性の証拠ではない。実serverの起動/終了要求、接続検証とのretry境界、frontendの所有scope、実Fcitxの終了順序は後続の承認済み2A作業として残る。満杯時の入力順序・保留入力救済/終了保全・実frontend・全6系統CIも未達で、A5/2Aを合格にしない。
+
+識別方法の根拠として、Linux v6.12の[SO_PEERPIDFD実装](https://github.com/torvalds/linux/blob/v6.12/net/core/sock.c)と[pidfsのprocess固有inode](https://github.com/torvalds/linux/blob/v6.12/fs/pidfs.c)を静的確認した。古いanon_inodeの共有inodeを識別に使わず、所有descriptorをStateの寿命まで保持する。実際のPID再利用を強制する試験は未実施で、probeのリンク時wrapによるSO_PEERCRED番号偽装と、実SO_PEERPIDFDの不一致を組み合わせた故障注入である。
