@@ -1,5 +1,8 @@
 # Ubuntu開発のCI運用
 
+
+2026-11-17受入範囲凍結：[AGENTS.md](../../AGENTS.md)冒頭と[計画](phase-02-plan.md)冒頭を優先する。実Fcitx5ロード/Wayland/X11/実frontend・server/実表示測定は2Bへ移管。SDK不足noticeは引き続き未実行。2Aのコード安全性と最終SHA全6系統CI要件は維持し、未実行CIを成功扱いしない。
+
 2026-11-16更新。AGENTS.mdとPLANS.mdに従い、通常pushは軽量、Phase完了・main統合前はフルCIとする。2Aの再開/実装範囲は最新ユーザー指示とPLANS.mdに従い、CI成功だけでA5を合格扱いしない。
 
 ## 実行条件
