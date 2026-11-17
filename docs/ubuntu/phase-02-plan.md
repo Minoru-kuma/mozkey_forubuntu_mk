@@ -1,5 +1,7 @@
 # Phase 2 詳細実装計画・受入条件（レビュー完了）
 
+**所有scopeの追加接続：client/poolの準備jobへaddon所有scopeを接続。fresh-keyだけの一度起動、既存peer非adopt、IC取消とaddon終了の分離、管理jobからの起動禁止を限定検証した。停止後keyの再利用・入力救済等が未達でfactory拒否、2A未完了を維持する。**
+
 **2026-11-16継続：専用server入口へ所有起動bootstrapを接続し、標準pidfd_spawn・private OFD lease・別native supervisor・pidfs peer照合を模擬ELFで限定検証する。自動起動経路/実server/入力救済は未完了で、factory拒否と2A未完了を維持する。工程間レビューでは停止せず承認済み独立作業を継続。最新証拠は結果末尾を参照。**
 
 **再開後（2026-11-13〜14）：worker native join/TLS、通常終了時snapshot、compose、非同期session解放、再変換の副作用guardを実装し、15ターゲット138ケースで限定検証。factory解除・2A合格は未達条件と全6系統CI未検証のため行わない。[結果](phase-02-results.md)末尾の最新判定を優先し、工程間レビュー待ちを理由に実装全体を止める扱いはしない。**

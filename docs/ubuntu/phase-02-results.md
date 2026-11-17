@@ -1004,3 +1004,30 @@ A1来歴/通知とA7の保護・資源条件を維持。A2/A3/A4/A6は部分実�
 専用serverの自動起動scope/既存keyとの境界、入力満杯時の順序/救済、永久I/Oとruntime終了、実frontend/実server・全6系統CIは引き続き未達・未検証。factory常時拒否、2A未完了・2B移行不可を維持して承認済み作業を継続する。
 
 実SDKの既存`run_fcitx5_api_probe.py`も再実行し、Fcitx5 5.1.19でFCITX5_API_PROBE PASS（`P2/logs/fcitx5-api-child-exit-order-20261116.log`）。合成応答10/250/500/1000msでevent loop継続、live-500時のheartbeat最大遅延2.219ms、live-1000時0.531ms。350msをdeferで同期待機する負例のlagは350.038ms。3500ms worker停止では終了待ち約390.1ms・未回収を確認し、合格へ読み替えない。実製品IME/Instance/serverは起動せず、合成frontendと実ライブラリAPIに限定する。元差分/76資産/cache保持、buildifierとPython/YAML/diff検査も確認した。
+
+
+## 2026-11-16継続：所有scopeをclient/sessionへ接続
+
+再開基点`42c5a0ce7cd4c206808218f1ba449682a03ef540`は作業ブランチへpush済み、リモートHEAD一致。75ファイルの`P2/staging-42c5a0ce7`はdirty=false・NODELETE・限定exportを確認した。該当SHAのLint `43802914767`、Linux limited `43802914836`、Zenz `43802914784`は成功。今回の変更へ旧CI成功を流用しない。
+
+`ServerOwner`をengineが一つ所有し、client/pool/AsyncSessionへ同じ値だけの準備jobを渡す。IC/要求の取消でserverを終了させず、addon破棄/実終了のscope取消で所有子だけをnative supervisorへ回収させる。jobはheap state/endpoint/取消flagだけを持ち、addon/IC/loop/借用FDをcaptureしない。wrapper公開前の取消にもeventfd wakeを送る。FDはRAIIで保護し、full profile/key/UID/PID/executable/protocol/product検証を終えた同じnonblocking/CLOEXEC FDだけを移譲する。
+
+新規起動はkey無し・まだ検証済FDを渡したことがない場合に一度だけ。子の入口でもO_EXCLで`.session.ipc`を予約し、親の不存在確認とexec間に作成された通常file/symlinkを上書きしない。既存の検証済peerは所有権を奪わず、scope取消でも終了しない。不正/古いkeyは修復/削除/再起動しない。設定保存用jobはallow_launch=false。接続後のpeer/key喪失をcleanupや次要求の起動許可へ変換しない。
+
+予約後の失敗や所有server終了後にはempty/古いkeyが残り、現実装は自動再利用しない。これは安全側の部分実装で、再起動/失敗後復旧を完了したとは報告しない。既存資産を削除して起動できたことにしない。factory常時拒否・Enabled=Falseを維持する。
+
+### 限定試験
+
+合成ELF probeは新規予約成功・既存key拒否・symlink先不変の3ケースを追加して24シナリオ成功（`P2/logs/owned-child-fresh-key-20261116-initial.log`）。実IME/serverを使わず、既存key/sentinelの内容・0600権限・symlinkが保持されることを確認した。
+
+新しいprotocol fixtureはMozcServer/SessionServer/辞書/IMEを含まず、実profile/key protobuf、private OFD lock、抽象socket、UID/PID/実行画像/版の検証を通す最小ELF。SDK不要のserver_owner_testで以下11ケースを実行した：fresh FD移譲と所有子取消、350ms準備中のscope取消、addon owner破棄後のjob、不正key保護、symlink先のmode/content保護、取消済ownerの起動拒否、IC要求取消後の同じ所有server利用、検証済既存peerの非adopt/非停止、validだが古いkeyの保持、管理保存からの起動禁止、接続済peerがkeyを削除した後の暗黙起動禁止。独立fixtureもbirth pidfdで所有/回収し、PID番号へsignalを送らない。
+
+実Fcitx5 EventLoopを使う追加1ケースは、350msの合成起動遅延中もheartbeatを71回処理し、約360.5msで初期応答、callback2回、CREATE_SESSION→SET_REQUEST→GET_CONFIG→SEND_KEYを各一回記録した。これは初期化＋合成要求の値であり、実frontend/実serverのひらがな表示300ms達成ではない。実Instance/IMEは起動しない。
+
+`P2/run_server_owner_no_restart_20261116.py`で製品stage_inputsと18ターゲット177成功・fixture入口2 skip。変更したserver_owner/async_sessionの2ターゲットを実行し16ターゲットは対応cache再利用。63.572秒、RX上限10,721,495 bytes、workspace peak 7,208,701,952 bytes。jobs=2・取得禁止・隔離HOME/XDGと既存cacheを維持した。前段の初回scope6ケース、peer/管理/cleanup追加確認もそれぞれlogを保持し、最終成功と区別する。OFF61の前回成功資産と旧52ケースを保持し、今回のOFF再実行とは扱わない。
+
+軽量CIへSDK不要のserver_owner_testを追加してON6ターゲットとした。cqueryの2544 labelにFcitx5 SDK、辞書dataset、製品server/package依存を含まないことを確認（`resume-server-owner-graph-20261116-summary.json`、16.243秒）。集計scriptは非空label集合を要求する。新しい実EventLoopケースはSDKがある場合の既存async_session_testに含め、SDK不足noticeで返る場合は未実行扱いを維持する。
+
+A1/A7は来歴/通知・資源/既存資産保護を維持し、A2/A3/A4/A6は部分実施を拡張。A5は停止後keyの安全な再利用、満杯時の入力順序/保留救済/終了保全、永久I/O/依存runtime、実frontend/実serverと全6系統CIが未達・未検証。2A未完了・2B移行不可のまま、承認済み独立作業を継続する。新規stagingは最終commit SHAに対応した別ディレクトリへ作り、旧資産を上書きしない。
+
+FD属性検査ではfcntl自体の成功も明示確認し、最終`run_server_owner_fd_check_20261116.py`で製品build/18ターゲット成功（26.955秒、RX上限6,299,203 bytes、peak 7,206,195,200 bytes）。変更したowner testだけを実行し他は対応cacheを利用。元worktree差分/76資産/cacheを再照合し保持、buildifier・Python/YAML/埋込shell・diff検査を確認。actionlint/clang-formatは未導入・未実行。

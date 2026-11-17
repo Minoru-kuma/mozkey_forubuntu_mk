@@ -138,10 +138,11 @@ static_assert(mozc::commands::NUM_OF_COMPOSITIONS == kNumCompositionModes,
 MozcEngine::MozcEngine(Instance* instance)
     : instance_(instance),
       parser_(std::make_unique<MozcResponseParser>(this)),
+      serverOwner_(std::make_shared<mozc::fcitx5::ServerOwner>()),
       cleanup_(std::make_shared<mozc::fcitx5::SessionCloseQueue>()),
-      client_(createClient(instance->eventLoop(), cleanup_)),
+      client_(createClient(instance->eventLoop(), cleanup_, serverOwner_->PreparationJob(false))),
       factory_([this](InputContext& ic) { return new MozcState(&ic, this); }) {
-  pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy(), instance->eventLoop(), cleanup_);
+  pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy(), instance->eventLoop(), cleanup_, serverOwner_->PreparationJob());
   for (auto command :
        {mozc::commands::DIRECT, mozc::commands::HIRAGANA,
         mozc::commands::FULL_KATAKANA, mozc::commands::FULL_ASCII,
@@ -216,6 +217,7 @@ MozcEngine::MozcEngine(Instance* instance)
     for (auto* state : states_) state->Shutdown();
     if (client_) client_->Cancel();
     cleanup_->Cancel();
+    serverOwner_->Cancel();
     auto records = mozc::fcitx5::InputRetention::Snapshot();
     records.erase(std::remove_if(records.begin(), records.end(), [](const auto& record) {
       return record->pending.empty() && record->composing.empty() && record->preedit.empty() &&
@@ -245,6 +247,7 @@ MozcEngine::~MozcEngine() {
   for (auto* state : states_) state->Shutdown();
   if (client_) client_->Cancel();
   cleanup_->Cancel();
+  serverOwner_->Cancel();
 }
 
 void MozcEngine::setConfig(const RawConfig& config) {

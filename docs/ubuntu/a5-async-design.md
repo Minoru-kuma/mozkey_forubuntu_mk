@@ -1,6 +1,6 @@
 # A5設計・暫定受入条件：イベントループの継続性
 
-**2026-11-16継続：専用serverの所有起動に向けたLinux x86_64限定`OwnedChild`を追加し、模擬ELFで起動・取消・pidfd回収を検証中。専用server入口のbootstrap検証とaddonのNODELETEを接続するが、自動起動経路はまだ接続せず、factory常時拒否を維持する。実server/IMEは起動しない。下記「専用子プロセスの所有境界」と結果末尾を参照。**
+**2026-11-16継続：専用serverの所有起動に向けたLinux x86_64限定`OwnedChild`を追加し、模擬ELFで起動・取消・pidfd回収を検証中。専用server入口のbootstrap検証とaddonのNODELETEを接続するが、未接続だった所有scopeをclient/poolへ接続した。新規keyだけの起動に限定し、既存/停止後keyの再起動等は未完了のためfactory常時拒否を維持する。実server/IMEは起動しない。下記「専用子プロセスの所有境界」と結果末尾を参照。**
 
 **再開後の最新境界（2026-11-13〜14）：native worker join/TLS、通常終了の最終snapshot、compose保持、非同期session解放、再変換/削除guardを実装・限定検証した。工程間レビュー待ちではない。危険な機能の有効化と2A合格は、残る安全条件・実frontend/実server・全6系統CIの証拠が不足するため保留する。以下の過去記述と差がある箇所は末尾と[最新結果](phase-02-results.md)を優先する。**
 
@@ -211,7 +211,7 @@ Linux Mozkey設定ONだけで、profile作成とlock/keyファイルをFD相対�
 
 ## 専用子プロセスの所有境界（2026-11-16）
 
-新しい常駐サービスを追加せず、既存の専用serverをFcitx5が所有する子として扱うための境界を分離する。`src/base/owned_child.{h,cc}`はLinux x86_64専用・manual/opt-inで、InputContext、addon、event loop、protobuf/NSS、ユーザー入力の参照を持たない。現段階では製品serverの入口検証だけを接続し、frontendからの自動Spawnは未接続とする。
+新しい常駐サービスを追加せず、既存の専用serverをFcitx5が所有する子として扱うための境界を分離する。`src/base/owned_child.{h,cc}`はLinux x86_64専用・manual/opt-inで、InputContext、addon、event loop、protobuf/NSS、ユーザー入力の参照を持たない。後続の所有scopeでfrontendへ接続したが、fresh-key起動だけに限定する。既存/失敗後keyの自動再起動と入力救済は未完了で、factory常時拒否を維持する。
 
 | 境界 | 契約 |
 |---|---|
@@ -240,3 +240,21 @@ native supervisorは制御eventfd（process寿命で1個）、子pidfdとnonbloc
 製品のexit callbackへ接続し、childと準備workerに合計390msだけを割り当てる。guardを取得できない場合は、子の終了処理が終わるまでfinal jobを登録せず、creatorを先にsealしない。focus/IME切替/unloadには当該待機を追加しない。snapshot失敗/未回収は従来どおり未達であり、400ms成功へ読み替えない。
 
 合成ELFの150ms graceful処理と最終jobを併走させた正例では双方完了、約154msでchild/creatorを回収した。guardを省いてcreatorを先に終了させた負例では、PDEATHSIGで子が終了しgraceful完了markerが残らない。これで終了順序の必要性を確認したが、実serverのprotocol/保存処理や実Fcitxのexit callback全体は未実行である。結果末尾と`owned-child-exit-order-20261116-initial.log`を参照。
+
+
+### addon所有scopeと新規key限定起動（2026-11-16）
+
+`ServerOwner`をengineが一つ所有し、client/pool/AsyncSessionへ同じ値だけのPreparationJobを渡す。jobはScopeのheap stateと取消flagを捕捉し、addon/IC/loopを参照しない。filesystem/NSS/peer検証/起動は単一準備worker上に置く。IC要求の取消はjobだけを失効し、addon所有serverを終了しない。addon破棄/実終了はscopeの取消flagとnative supervisorへのwakeを使い、wrapperの公開前でも取消を伝える。通常終了では前節のcreator guardと合計390msの残予算を使う。
+
+| 状態 | 接続・起動の扱い |
+|---|---|
+| 製品/profile/UID/PID/実行path/版を検証できる既存接続 | 同じnonblocking/CLOEXEC FDを移譲し、所有権を奪わず停止しない |
+| keyがない・まだ検証済FDを渡したことがない | input用jobに限って一度だけ起動を試みる。検査済み画像・leaseを継承し、子の入口でもO_CREAT/O_EXCLで`.session.ipc`を予約する。親の不存在確認とexec間にkeyが作成された場合も上書きしない |
+| 既存keyが不正/別peer/版違い/切断/古いPID等 | connect失敗を起動許可と解釈せず、移行/修復/削除/再起動しない |
+| 一度接続したpeerが喪失しkeyも消えた | cleanupや次要求から暗黙に新serverを起動しない。旧sessionを別generationへ送らない |
+| Fcitx設定保存など管理用job | allow_launch=false。一度も使っていないserverを設定保存だけで起動しない |
+| 起動/準備中の要求取消 | IC callbackとFD移譲を抑止するが、scopeが存続する限り所有serverは次の要求に利用できる |
+
+原子的予約に成功した後の起動失敗/通常終了では、emptyまたは古いkeyが残る場合がある。新scopeからも自動削除/再起動を許可しないため、現段階は初回起動経路の部分実装である。所有を証明したkeyの再利用/失敗後復旧は未完了で、既存資産を削除して回避しない。実serverの保存/終了、永久exec I/O/worker/runtime、満杯時の入力順序と保留入力救済、実frontendと全6系統CIも未検証/未達。factoryを有効化しない。
+
+合成protocol fixtureはMozcServer/SessionServer/辞書/IMEを含まず、実profile/key protobuf/peer/executableの検証を通るELFだけを使う。SDK不要の11ケースでFD移譲、owner破棄、IC取消、既存peer非adopt、不正/古いkey保護、管理job起動禁止、暗黙再起動禁止を確認した。実Fcitx5 EventLoopの追加ケースでは350ms遅延中にheartbeatが進み、CREATE→SET_REQUEST→GET_CONFIG→SEND_KEYが一度ずつ処理された。約361msは初期化応答であり、実ひらがな表示300msやA5合格の証明ではない。

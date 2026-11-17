@@ -116,6 +116,7 @@ jobs:
           bazelisk test //base:mozkey_profile_test //base:system_util_test \
             //base:process_mutex_test //ipc:ipc_path_manager_test \
             //unix/fcitx5:worker_runtime_test \
+            //unix/fcitx5:server_owner_test \
             --//:linux_mozkey=true --config release_build --jobs=2 \
             --test_output=errors --test_timeout=60 \
             --test_env=XDG_CONFIG_HOME="$RUNNER_TEMP/mozkey-profile-test-config" \

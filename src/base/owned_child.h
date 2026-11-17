@@ -17,6 +17,10 @@ class OwnedChild {
   struct Spec {
     std::string executable, profile;
     std::vector<std::string> arguments, environment;
+    // Initial launch only: the child must atomically reserve a missing session
+    // key before any product I/O. An existing regular/symlink key fails closed.
+    // Reservation failure never repairs, truncates or removes existing assets.
+    bool fresh_key_only = false;
   };
   // Worker only: validation and pidfd_spawn may block on filesystem/exec I/O.
   // ONE process-root reservation, plus an inherited private OFD launch lease,

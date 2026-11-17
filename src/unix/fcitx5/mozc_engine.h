@@ -48,6 +48,7 @@
 #include "unix/fcitx5/i18nwrapper.h"
 #include "unix/fcitx5/mozc_client_interface.h"
 #include "unix/fcitx5/mozc_client_pool.h"
+#include "unix/fcitx5/server_owner.h"
 #include "unix/fcitx5/mozc_state.h"
 #include "unix/fcitx5/async_config.h"
 
@@ -147,6 +148,7 @@ class MozcEngine final : public InputMethodEngineV2 {
   std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
   Instance* instance_;
   const std::unique_ptr<MozcResponseParser> parser_;
+  std::shared_ptr<mozc::fcitx5::ServerOwner> serverOwner_;
   std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup_;
   std::unique_ptr<MozcClientInterface> client_;
   std::unique_ptr<MozcClientPool> pool_;

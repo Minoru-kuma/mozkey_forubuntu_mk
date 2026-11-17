@@ -20,7 +20,7 @@ void MozcIPCClient::Cancel() {
   else if (session) session->Cancel();
 }
 std::unique_ptr<MozcClientInterface> createClient(EventLoop& loop,
-    std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup) {
-  return std::make_unique<MozcIPCClient>(loop, std::move(cleanup));
+    std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup, ConnectionPrepare prepare) {
+  return std::make_unique<MozcIPCClient>(loop, std::move(cleanup), std::move(prepare));
 }
 }

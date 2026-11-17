@@ -6,11 +6,19 @@
 #include <unistd.h>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sys/stat.h>
 #include <mutex>
 #include <iostream>
 #include <thread>
 #include <vector>
 #include "testing/gunit.h"
+#include "testing/mozctest.h"
+#include "base/owned_child.h"
+#include "base/system_util.h"
+#include "unix/fcitx5/server_owner.h"
 
 namespace mozc::fcitx5 {
 namespace {
@@ -83,6 +91,53 @@ TEST(AsyncSessionTest, InitializationOrderAndTwoKeys) {
   EXPECT_EQ(received[0].type(), commands::Input::CREATE_SESSION);
   EXPECT_EQ(received[1].type(), commands::Input::SET_REQUEST);
   EXPECT_EQ(received[2].key().key_code(), 'a'); EXPECT_EQ(received[3].key().key_code(), 'b');
+}
+class OwnedAsyncSessionTest : public mozc::testing::TestWithTempUserProfile {
+ protected:
+  void TearDown() override {
+    owner_.reset();
+    const auto end = std::chrono::steady_clock::now()+2s;
+    while ((OwnedChild::Busy() || PreparationWorker::Busy()) && std::chrono::steady_clock::now() < end)
+      std::this_thread::sleep_for(1ms);
+    EXPECT_FALSE(OwnedChild::Busy()); EXPECT_FALSE(PreparationWorker::Busy());
+    TestWithTempUserProfile::TearDown();
+  }
+  std::unique_ptr<ServerOwner> owner_;
+};
+TEST_F(OwnedAsyncSessionTest, RealWorkerAndVerifiedOwnedPeerInitializeWithoutBlockingLoop) {
+  const char* source = std::getenv("TEST_SRCDIR");
+  const char* workspace = std::getenv("TEST_WORKSPACE");
+  ASSERT_NE(source, nullptr); ASSERT_NE(workspace, nullptr);
+  const auto profile = SystemUtil::GetUserProfileDirectory();
+  const auto executable = profile+"/fixture";
+  ASSERT_TRUE(std::filesystem::copy_file(std::filesystem::path(source)/workspace/"unix/fcitx5/server_owner_fixture", executable));
+  ASSERT_EQ(chmod(executable.c_str(), 0700), 0);
+  owner_ = std::make_unique<ServerOwner>(LinuxDeadlineEndpoint{profile, executable, "session"}, std::vector<std::string>{"--pause350"});
+  fcitx::EventLoop loop;
+  AsyncSession session(loop, {}, owner_->PreparationJob());
+  int ticks = 0, ticks_at_reply = 0, calls = 0;
+  const auto begin = fcitx::now(CLOCK_MONOTONIC); uint64_t latency = 0;
+  auto tick = loop.addTimeEvent(CLOCK_MONOTONIC, begin+5000, 1,
+      [&](fcitx::EventSourceTime* source, uint64_t) {
+        ++ticks; source->setTime(fcitx::now(CLOCK_MONOTONIC)+5000); source->setEnabled(true); return true;
+      });
+  tick->setOneShot();
+  commands::Input config; config.set_type(commands::Input::GET_CONFIG);
+  ASSERT_TRUE(session.Submit(std::move(config), [&](bool ok, auto output) {
+    EXPECT_TRUE(ok); EXPECT_TRUE(output.has_config()); ++calls;
+    ticks_at_reply = ticks; latency = fcitx::now(CLOCK_MONOTONIC)-begin;
+  }));
+  ASSERT_TRUE(session.Submit(KeyInput('a'), [&](bool ok, auto output) {
+    EXPECT_TRUE(ok); EXPECT_TRUE(output.consumed()); ++calls;
+  }));
+  RunLoop(loop, 1000);
+  EXPECT_EQ(calls, 2); EXPECT_GT(ticks_at_reply, 30); EXPECT_TRUE(session.ready());
+  std::ifstream trace(profile+"/.fixture-requests"); std::vector<int> types;
+  int type; while (trace >> type) types.push_back(type);
+  EXPECT_EQ(types, (std::vector<int>{commands::Input::CREATE_SESSION, commands::Input::SET_REQUEST,
+      commands::Input::GET_CONFIG, commands::Input::SEND_KEY}));
+  std::cout << "OWNED_SESSION_METRIC startup_ms=350 reply_ms=" << latency/1000.0
+            << " ticks_at_reply=" << ticks_at_reply << " calls=" << calls << std::endl;
 }
 TEST(AsyncSessionTest, SlowReplyKeepsLoopAlive) {
   for (auto delay : {0ms, 250ms, 500ms, 1000ms}) {

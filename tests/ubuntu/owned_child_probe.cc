@@ -121,6 +121,8 @@ int main(int argc, char* argv[]) {
   auto flag = std::make_shared<std::atomic<bool>>(false);
   auto result = std::make_shared<Result>();
   OwnedChild::Spec spec{executable, profile, {}, {"LANG=C"}};
+  const bool fresh_conflict = mode == "fresh-conflict" || mode == "fresh-symlink";
+  spec.fresh_key_only = mode == "fresh-key" || fresh_conflict;
   if (mode == "bad-env") spec.environment.push_back("LD_PRELOAD=/must-not-load");
   if (mode == "ignore-term" || mode == "retained-worker") spec.arguments.push_back("--ignore-term");
   if (mode == "startup350") spec.arguments.push_back("--delay350");
@@ -154,7 +156,11 @@ int main(int argc, char* argv[]) {
   if (mode == "cancel-before-spawn350") ok = !child && ticks > 10 && ok;
   bool owner_collected = false, busy_during_reap = false;
   long cancel_us = -1;
-  if (child && rejected) {
+  if (child && fresh_conflict) {
+    ok = PumpUntil([&] { return child->finished(); }, 500ms) && ok;
+    ok = child->reaped_by_owner() && access((profile+"/.fixture-ready").c_str(), F_OK) != 0 && ok;
+    owner_collected = child->reaped_by_owner();
+  } else if (child && rejected) {
     ok = PumpUntil([&] { return child->finished(); }, 500ms) && ok;
     ok = child->error() != 0 && child->pid() < 0 && !child->reaped_by_owner() && ok;
   } else if (child) {

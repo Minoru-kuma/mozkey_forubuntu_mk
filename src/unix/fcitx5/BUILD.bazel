@@ -111,6 +111,7 @@ mozc_cc_library(
         ":mozc_client_pool",
         ":mozc_ipc_client",
         ":response_guard",
+        ":server_owner",
         ":surrounding_text_util",
         "//base:owned_child",
         "//base:port",
@@ -234,6 +235,61 @@ mozc_cc_test(
 )
 
 mozc_cc_library(
+    name = "server_owner",
+    srcs = ["server_owner.cc"],
+    hdrs = ["server_owner.h"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":preparation_worker",
+        "//base:mozkey_profile",
+        "//base:owned_child",
+        "//base:system_util",
+        "//ipc:linux_deadline",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_binary(
+    name = "server_owner_fixture",
+    testonly = True,
+    srcs = ["server_owner_fixture.cc"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//base:owned_child",
+        "//base:system_util",
+        "//ipc:ipc_path_manager",
+        "//protocol:commands_cc_proto",
+    ],
+)
+
+mozc_cc_test(
+    name = "server_owner_test",
+    srcs = ["server_owner_test.cc"],
+    data = [":server_owner_fixture"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//:linux_mozkey_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":preparation_worker",
+        ":server_owner",
+        "//base:owned_child",
+        "//base:system_util",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+    ],
+)
+
+mozc_cc_library(
     name = "connection_preparation",
     srcs = ["connection_preparation.cc"],
     hdrs = ["connection_preparation.h"],
@@ -344,6 +400,7 @@ mozc_cc_library(
 mozc_cc_test(
     name = "async_session_test",
     srcs = ["async_session_test.cc"],
+    data = [":server_owner_fixture"],
     tags = ["manual"],
     target_compatible_with = select({
         "//:linux_mozkey_enabled": [],
@@ -351,7 +408,11 @@ mozc_cc_test(
     }),
     deps = [
         ":async_session",
+        ":server_owner",
+        "//base:owned_child",
+        "//base:system_util",
         "//testing:gunit_main",
+        "//testing:mozctest",
     ],
 )
 

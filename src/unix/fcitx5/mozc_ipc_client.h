@@ -7,8 +7,9 @@
 namespace fcitx {
 class MozcIPCClient final : public MozcClientInterface {
  public:
-  MozcIPCClient(EventLoop& loop, std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup)
-      : session_(std::make_shared<mozc::fcitx5::AsyncSession>(loop)), cleanup_(std::move(cleanup)) {}
+  MozcIPCClient(EventLoop& loop, std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup,
+                ConnectionPrepare prepare = {})
+      : session_(std::make_shared<mozc::fcitx5::AsyncSession>(loop, mozc::LinuxDeadlineEndpoint{}, std::move(prepare))), cleanup_(std::move(cleanup)) {}
   ~MozcIPCClient() override { Cancel(); }
   bool Submit(mozc::commands::Input input, Done done) override;
   void Cancel() override;

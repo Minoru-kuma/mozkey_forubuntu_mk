@@ -31,16 +31,35 @@ with tempfile.TemporaryDirectory(prefix='mozkey-owned-child-') as directory:
     public.chmod(0o777)
     link = work / 'symlink-fixture'
     link.symlink_to(fixture)
+    sentinel = work / 'key-sentinel'
+    sentinel.write_bytes(b'foreign-key-must-survive')
+    sentinel.chmod(0o600)
     for mode in ('normal', 'startup350', 'cancel-before-spawn350', 'ignore-term',
                  'graceful', 'stall-shutdown', 'wrong-peer', 'spoof-peer', 'legacy-peer',
                  'duplicate', 'bad-env', 'symlink',
                  'public-image', 'drop-handle', 'auto-reap', 'retained-worker',
-                 'exit-no-hold', 'exit-hold'):
+                 'exit-no-hold', 'exit-hold', 'fresh-key', 'fresh-conflict', 'fresh-symlink'):
         profile = work / mode
         profile.mkdir(mode=0o700)
+        key = profile / '.session.ipc'
+        if mode == 'fresh-conflict':
+            key.write_bytes(b'foreign-key-must-survive')
+            key.chmod(0o600)
+        if mode == 'fresh-symlink':
+            key.symlink_to(sentinel)
         executable = link if mode == 'symlink' else public if mode == 'public-image' else fixture
         subprocess.run([str(probe), mode, str(executable), str(profile)],
                        check=True, timeout=12)
+        if mode == 'fresh-key':
+            assert key.is_file() and not key.is_symlink() and key.read_bytes() == b''
+            assert key.stat().st_mode & 0o7777 == 0o600
+        if mode in ('fresh-conflict', 'fresh-symlink'):
+            assert key.read_bytes() == b'foreign-key-must-survive'
+            assert key.stat().st_mode & 0o7777 == 0o600
+            assert key.is_symlink() == (mode == 'fresh-symlink')
+            assert not (profile / '.fixture-ready').exists()
+        assert sentinel.read_bytes() == b'foreign-key-must-survive'
+        assert sentinel.stat().st_mode & 0o7777 == 0o600
 
     # Distinct host roots must contend on the same inherited OFD lease. No
     # product process is involved; the second root must not start another child.

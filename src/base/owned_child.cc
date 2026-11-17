@@ -242,6 +242,7 @@ std::shared_ptr<OwnedChild> OwnedChild::SpawnOnWorker(Spec spec, std::shared_ptr
     if (null.value < 0 || fstat(null.value, &info) || !S_ISCHR(info.st_mode) || info.st_rdev != makedev(1,3)) return fail(EPERM);
     Fd high_null(fcntl(null.value, F_DUPFD_CLOEXEC, 5)); if (high_null.value < 0) return fail(errno);
     std::vector<std::string> argv{spec.executable, "--mozkey-owned-parent="+std::to_string(getpid()), "--mozkey-owned-profile="+spec.profile};
+    if (spec.fresh_key_only) argv.push_back("--mozkey-owned-fresh-key");
     for (auto& arg : spec.arguments) { if (arg.size() > 4096 || arg.find('\0') != arg.npos || arg.starts_with("--mozkey-owned-")) return fail(EINVAL); argv.push_back(std::move(arg)); }
     std::vector<char*> args; for (auto& arg : argv) args.push_back(arg.data()); args.push_back(nullptr);
     std::vector<std::string> environment;
@@ -317,15 +318,16 @@ bool OwnedChild::WaitForProcessExit(std::chrono::milliseconds budget) {
 bool InitializeOwnedChild(int* argc, char* argv[], std::string* profile) {
   if (!profile || !argc || *argc < 1 || !argv) return false;
   profile->clear();
-  std::string parent, root; bool seen_parent = false, seen_root = false;
+  std::string parent, root; bool seen_parent = false, seen_root = false, fresh_key = false;
   for (int i=1; i<*argc; ++i) {
     if (!argv[i]) return false;
     const std::string_view arg(argv[i]);
     if (arg.starts_with("--mozkey-owned-parent=")) { if (seen_parent) return false; seen_parent = true; parent = arg.substr(22); }
     else if (arg.starts_with("--mozkey-owned-profile=")) { if (seen_root) return false; seen_root = true; root = arg.substr(23); }
+    else if (arg == "--mozkey-owned-fresh-key") { if (fresh_key) return false; fresh_key = true; }
     else if (arg.starts_with("--mozkey-owned-")) return false;
   }
-  if (!seen_parent && !seen_root) return true;
+  if (!seen_parent && !seen_root) return !fresh_key;
   int pid = 0; const auto parsed = std::from_chars(parent.data(), parent.data()+parent.size(), pid);
   if (!seen_parent || !seen_root || parent.empty() || root.empty() || parsed.ec != std::errc{} || parsed.ptr != parent.data()+parent.size() || pid <= 1 ||
       prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != pid) return false;
@@ -339,6 +341,18 @@ bool InitializeOwnedChild(int* argc, char* argv[], std::string* profile) {
       named_lock.l_start != 0 || named_lock.l_len != 0 || fcntl(4, F_OFD_GETLK, &inherited_lock) || inherited_lock.l_type != F_UNLCK ||
       fstat(3, &image) || stat("/proc/self/exe", &self) || image.st_dev != self.st_dev || image.st_ino != self.st_ino ||
       fcntl(4, F_SETFD, FD_CLOEXEC) || getppid() != pid) return false;
+  if (fresh_key) {
+    // The parent-side absence check is not sufficient: another writer could
+    // create a key before exec. Reserve it atomically before InitMozc/server.
+    // A failed/cancelled first launch may leave this empty reservation behind;
+    // never erase it or treat an arbitrary existing key as permission to retry.
+    Fd key(openat(directory.value, ".session.ipc",
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600));
+    struct stat key_info{};
+    if (key.value < 0 || fstat(key.value, &key_info) || !S_ISREG(key_info.st_mode) ||
+        key_info.st_uid != geteuid() || key_info.st_nlink != 1 ||
+        (key_info.st_mode & 07777) != 0600) return false;
+  }
   close(3);
   int output = 1;
   for (int i=1; i<*argc; ++i) {

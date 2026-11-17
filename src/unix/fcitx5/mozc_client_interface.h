@@ -3,6 +3,7 @@
 #ifndef UNIX_FCITX5_MOZC_CLIENT_INTERFACE_H_
 #define UNIX_FCITX5_MOZC_CLIENT_INTERFACE_H_
 #include <fcitx-utils/event.h>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -11,6 +12,7 @@
 #include "protocol/config.pb.h"
 namespace mozc::fcitx5 { class SessionCloseQueue; }
 namespace fcitx {
+using ConnectionPrepare = std::function<int(const std::atomic<bool>&)>;
 class MozcClientInterface {
  public:
   using Done = std::function<void(bool, mozc::commands::Output)>;
@@ -27,6 +29,7 @@ class MozcClientInterface {
   virtual bool LaunchTool(const std::string&, std::string_view) { return false; }
   virtual bool LaunchToolWithProtoBuf(const mozc::commands::Output&) { return false; }
 };
-std::unique_ptr<MozcClientInterface> createClient(EventLoop& loop, std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup = {});
+std::unique_ptr<MozcClientInterface> createClient(EventLoop& loop,
+    std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup = {}, ConnectionPrepare prepare = {});
 }
 #endif
