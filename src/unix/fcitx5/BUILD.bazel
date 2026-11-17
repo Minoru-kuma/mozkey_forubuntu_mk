@@ -464,6 +464,14 @@ mozc_cc_library(
 mozc_cc_test(
     name = "async_config_test",
     srcs = ["async_config_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=fsync",
+        "-Wl,--wrap=renameat2",
+        "-Wl,--wrap=write",
+    ],
+    # Resolve the tested library's syscall references in this link so the
+    # fixture wrappers also cover TransferForWorker, not just the test object.
+    linkstatic = True,
     tags = ["manual"],
     target_compatible_with = select({
         "//:linux_mozkey_enabled": [],

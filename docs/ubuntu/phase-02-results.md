@@ -1065,3 +1065,20 @@ FocusInが自動投入するmode設定が先頭にあるため、単なるphysic
 直前e63470a80のLint `44003751932`、Linux limited `44003751899`、Zenz `44003752038`は成功し、リモートHEAD一致も確認した。今回のSHAへ旧CI成功を流用しない。
 
 **この変更はqueue満杯時の回復ではない。** 既存16件上限で既にsuspendした入力、結果不明の要求、表示済みpreedit、無制限な入力流入・再入、永久I/O、停止後keyの安全な再利用は依然未解決。未送信復帰の許容を、未知の要求のreplayや合格条件緩和へ広げない。実frontend/実server・全6系統CIも未検証。factory常時拒否とEnabled=False、2A未完了・2B移行不可を維持する。
+
+
+## 2026-11-17継続：保存不能と保存確認の境界
+
+再開基点は`7056951ede6cc09eb34dad7865d63259f84dafad`。既存worktree/branchを継続し、GitHub APIと既存SSH認証のls-remoteでmain `b489fca1561bf12ff6b43205378220163d71c21c`・作業branch HEAD一致を再確認した。元ステージ済み5ファイルのdiff hash、76資産hash、既存cacheの存在を再照合した。適用される`.agents/AGENTS.md`に従って設計/実装担当を使用した。
+
+残課題3の保存経路で、既存0700 directory内のtemporary作成がumaskで0000/0200/0400になると、開いた書込みFDによるwrite/fsync/renameが成功し、次回読めないsnapshotでも成功を返す問題を合成fixtureで再現した。`resume-save-failure-red-v2-20261117.log`の権限試験失敗が修正前の証拠。private directoryに実効0700を要求し、自分が新規作成したtemporaryをwrite前にfstatして本人所有・regular・single-link・実効0600を要求する。権限不足はtemporaryを除去して失敗とし、既存file/directoryをchmodして修復しない。通常configの権限契約は維持する。UIは保存失敗時に「保存を確認できなかった・入力はメモリに残る」と表示し、rename後の不確かな保存をファイル不存在と断定しない。
+
+追加4試験ではumask3種類、新規directoryが0000になる場合、既存0500 directoryの非修復、partial write ENOSPC/file fsync/rename/directory fsync/root fsyncの5故障を検証した。faultごとに注入到達を要求し、既存snapshotのinode/mode/内容不変を確認。rename前の失敗はtemporaryを除去し、rename後の同期失敗は完全な新snapshotを残してfalseを返す。linker wrapは試験だけで使い、共有library内へ到達しない初回失敗を受けて当該testだけlinkstatic=Trueとした。製品hookは追加しない。既存index失敗試験も再実行し、snapshot保持・latest sentinel不変・durable=falseを確認した。
+
+最終`P2/run_save_failure_v2_20261117.py`でstage_inputsと限定18ターゲット191成功、fixture入口2 skip（25.731秒、RX上限561,293 bytes、workspace peak 7,372,394,496 bytes）。変更依存のasync_config/input_recoveryを実行し、他16ターゲットは対応cacheを利用。OFF62と旧52ケースの既存証拠を保持し、今回のOFF再実行とは扱わない。Linux専用frontendとtest-only BUILDの変更で、共通protocol/OS分岐は変更しない。jobs=2・取得禁止・隔離HOME/XDG・既存Bazel9.0.2/cacheを維持した。buildifier/diff検査成功、actionlint/clang-formatは未導入・未実行。
+
+途中の`resume-save-failure-final-20261117.log`では、既存FreshProcessCanInspectAfterWriterExitのwriter子が通常archive完了後のWaitForProcessExitで即falseを返し失敗した。root mutexのtry_lock競合が候補だが原因は未確定。最終再実行は成功したものの、初回失敗を消さず、製品の安定した400ms回収保証に読み替えない。3500ms注入では約390msの待機後に未回収/durable=falseという既存判定を維持する。最初のred起動はBazel network profilerがsandbox内でcrashしたため、既存graph検証と同じexperimental_collect_system_network_usage=falseで無効化し、以後は独立RXカウンタで資源監視を継続した。
+
+満杯経路も設計レビューした。初期化中の16件目からfallbackへ切り替えるだけでは、fallback Defer未処理/配送hook再入時にも再び満杯となり17件目が先行する。上限増加・破棄・送信済みreplay・frontend専用block API流用は採用しない。一般満杯時の順序/回復は未解決で、今回queue動作を変更しない。
+
+保存不能時の完全保全、手動救済、停止後自己所有keyの再利用、永久filesystem/exec I/O・worker/runtime終了、実frontend/実serverと最終SHA全6系統CIは未達・未検証。今回の変更は保存成功の条件を厳密にする限定改善であり、A5/2A合格ではない。factory常時nullptr・Enabled=False、2A未完了・2B移行不可を維持する。実IME/server/tool起動、既存IME/システム設定変更、main統合、新規取得/ツール導入は行っていない。最終SHAのstaging/remote/CI結果は完了報告と新規ローカルログへ記録する。

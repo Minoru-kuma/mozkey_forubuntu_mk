@@ -402,7 +402,7 @@ void MozcEngine::SaveRetained(InputContext* ic) {
   if (records.empty()) { show(_("No retained input to save")); return; }
   std::string bytes;
   if (!mozc::fcitx5::InputRecovery::Encode(records, &bytes)) {
-    show(_("Input snapshot could not be saved; retained input remains in memory")); return;
+    show(_("Input snapshot save could not be confirmed; retained input remains in memory")); return;
   }
   // A new name plus RENAME_NOREPLACE preserves all previous snapshots.
   const auto filename = "held-" + std::to_string(getpid()) + "-" +
@@ -412,7 +412,7 @@ void MozcEngine::SaveRetained(InputContext* ic) {
   recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, bytes,
       [this, weak, root, filename, show](bool ok, auto) {
         if (weak.expired()) return;
-        if (!ok) { show(_("Input snapshot could not be saved; retained input remains in memory")); return; }
+        if (!ok) { show(_("Input snapshot save could not be confirmed; retained input remains in memory")); return; }
         recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, filename,
             [show](bool indexed, auto) { show(indexed ? _("Input snapshot saved; automatic replay is disabled") :
                 _("Input snapshot saved; the saved input list could not be updated")); }, SnapshotIndexOptions());

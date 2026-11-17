@@ -50,7 +50,8 @@ bool Transfer(const std::string& root, const std::optional<std::string>& save,
   Fd conf(openat(directory.fd, options.directory.c_str(), O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC));
   if (conf.fd < 0) return !save && errno == ENOENT;
   struct stat parent{}, target{};
-  if (fstat(conf.fd, &parent) || parent.st_uid != geteuid() || (parent.st_mode & (options.private_directory ? 0077 : 0022))) return false;
+  if (fstat(conf.fd, &parent) || parent.st_uid != geteuid() ||
+      (options.private_directory ? (parent.st_mode & 0777) != 0700 : (parent.st_mode & 0022))) return false;
   const int exists = fstatat(conf.fd, options.filename.c_str(), &target, AT_SYMLINK_NOFOLLOW);
   if ((exists && errno != ENOENT) || (!exists &&
       (!S_ISREG(target.st_mode) || target.st_uid != geteuid() || target.st_nlink != 1 || (options.private_directory && (target.st_mode & 0077))))) return false;
@@ -76,6 +77,16 @@ bool Transfer(const std::string& root, const std::optional<std::string>& save,
   auto name = "." + options.filename + "." + std::to_string(getpid()) + "." + std::to_string(++serial);
   Fd temporary(openat(conf.fd, name.c_str(), O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600));
   if (temporary.fd < 0) return false;
+  // open's requested mode is filtered by the process umask. A writable FD may
+  // still refer to an unreadable file, so do not publish a private snapshot
+  // that the next process cannot read. Never chmod an existing file/directory.
+  struct stat created{};
+  if (options.private_directory && (fstat(temporary.fd, &created) ||
+      !S_ISREG(created.st_mode) || created.st_uid != geteuid() || created.st_nlink != 1 ||
+      (created.st_mode & 0777) != 0600)) {
+    unlinkat(conf.fd, name.c_str(), 0);
+    return false;
+  }
   size_t offset = 0;
   while (offset < save->size() && !cancelled.load()) {
     auto n = write(temporary.fd, save->data()+offset, save->size()-offset);

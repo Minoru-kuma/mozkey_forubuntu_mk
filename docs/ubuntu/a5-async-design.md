@@ -270,3 +270,10 @@ deadline readerでもkey fileのlink数1を要求する。private directory/UID/
 初期化失敗時、まだserverへ送信しておらず表示済みpreeditもない物理rawキーを、元ICのfocus/IME/有効性を確認してDeferで一件ずつ転送する。ユーザーがこの限定範囲の英数復帰を許容した。翻訳/RPC、結果不明入力の再生、表示済み文字の自動確定は行わない。途中のfocus/配送中断は保留へ戻し、自動再開しない。自動初期mode設定だけはruntimeタグと厳密command照合により除外し、archiveへ権限を持ち越さない。
 
 これは16件満杯の問題を解決せず、満杯で既にsuspendしたqueueを復帰対象にしない。再入/無制限流入のbackpressure、停止後key、保存不能/永久I/Oと実frontendの証拠は別途必要。元の「結果不明入力を自動再生しない」条件とfactory拒否を維持する。
+
+
+### 保存の実効権限と不確かな完了（2026-11-17）
+
+private snapshotはdirectory実効0700と、新規temporaryの本人所有・regular・single-link・実効0600をwrite前に要求する。umaskが要求modeを削る場合は保存を拒否し、既存属性を自動修復しない。rename前の失敗はtemporaryを除去し、rename後のfsync失敗は新fileを保持したまま保存未確認とする。どちらも保留入力をメモリから除去せず、replay権限を与えない。試験だけを静的リンクし、write/fsync/renameの5故障への注入到達と旧snapshot不変を確認した。詳細と途中失敗は結果末尾を参照。
+
+通常archiveの隔離子で初回終了回収が即false、再実行成功という事象を記録した。原因未確定であり、400ms回収の安定性を保証しない。3500ms注入の未回収を成功へ読み替えない。満杯問題はfallbackへ早期遷移するだけでは解決せず、queueとfactoryの安全ゲートを維持する。
