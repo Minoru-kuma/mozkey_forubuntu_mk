@@ -68,7 +68,10 @@ bool ReadKey(const LinuxDeadlineEndpoint& endpoint, const LinuxDeadline& deadlin
   Fd key(openat(dir.get(), name.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
   if (key.get() < 0 || !IsPrivate(key.get(), false)) return false;
   struct stat st{};
-  if (fstat(key.get(), &st) != 0 || st.st_size <= 0 || st.st_size > 2096) return false;
+  // A hardlink can authorize a different private profile with the same key.
+  // Match the writer's single-link contract before reading or connecting.
+  if (fstat(key.get(), &st) != 0 || st.st_nlink != 1 ||
+      st.st_size <= 0 || st.st_size > 2096) return false;
   std::string data(st.st_size, '\0');
   size_t offset = 0;
   while (offset < data.size()) {

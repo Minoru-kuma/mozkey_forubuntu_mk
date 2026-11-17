@@ -212,5 +212,25 @@ TEST_F(ServerOwnerTest, LosingAnExistingPeerAndItsKeyCannotImplicitlyLaunchDurin
   EXPECT_EQ(Complete(cleanup), -1); EXPECT_FALSE(owner_->launch_attempted());
   EXPECT_FALSE(std::filesystem::exists(profile_+"/.session.ipc"));
 }
+TEST_F(ServerOwnerTest, HardlinkedKeyCannotAuthorizeAnotherPrivateProfile) {
+  IndependentFixture independent;
+  ASSERT_TRUE(independent.Start(executable_, profile_));
+  ASSERT_TRUE(Until([&] { return std::filesystem::exists(profile_+"/.fixture-ready"); }));
+  const auto key = profile_+"/.session.ipc";
+  const auto before = Read(key);
+  const auto other = profile_+"/other-profile";
+  ASSERT_EQ(mkdir(other.c_str(), 0700), 0);
+  ASSERT_EQ(link(key.c_str(), (other+"/.session.ipc").c_str()), 0);
+  endpoint_.profile = other;
+  auto worker = Begin(); ASSERT_TRUE(worker);
+  const int fd = Complete(worker);
+  EXPECT_LT(fd, 0);
+  if (fd >= 0) close(fd);
+  EXPECT_FALSE(owner_->launch_attempted()); EXPECT_FALSE(owner_->owns_process());
+  owner_->Cancel(); EXPECT_TRUE(independent.Alive());
+  struct stat info{}; ASSERT_EQ(stat(key.c_str(), &info), 0);
+  EXPECT_EQ(info.st_nlink, 2); EXPECT_EQ(info.st_mode & 0777, 0600);
+  EXPECT_EQ(Read(key), before); EXPECT_EQ(Read(other+"/.session.ipc"), before);
+}
 }  // namespace
 }  // namespace mozc::fcitx5

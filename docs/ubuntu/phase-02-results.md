@@ -1031,3 +1031,20 @@ A1来歴/通知とA7の保護・資源条件を維持。A2/A3/A4/A6は部分実�
 A1/A7は来歴/通知・資源/既存資産保護を維持し、A2/A3/A4/A6は部分実施を拡張。A5は停止後keyの安全な再利用、満杯時の入力順序/保留救済/終了保全、永久I/O/依存runtime、実frontend/実serverと全6系統CIが未達・未検証。2A未完了・2B移行不可のまま、承認済み独立作業を継続する。新規stagingは最終commit SHAに対応した別ディレクトリへ作り、旧資産を上書きしない。
 
 FD属性検査ではfcntl自体の成功も明示確認し、最終`run_server_owner_fd_check_20261116.py`で製品build/18ターゲット成功（26.955秒、RX上限6,299,203 bytes、peak 7,206,195,200 bytes）。変更したowner testだけを実行し他は対応cacheを利用。元worktree差分/76資産/cacheを再照合し保持、buildifier・Python/YAML/埋込shell・diff検査を確認。actionlint/clang-formatは未導入・未実行。
+
+
+## 2026-11-17再開：所有scope反映とhardlink keyの誤接続拒否
+
+休止時のステージ済み24ファイルを保持し、static検査・元差分/76資産/cache再照合後に`9cc38ab27eb170b25ed10c6f5348c8f495493075`へcommitした。既存`feat/ubuntu-phase2a`へpushしls-remote一致、導入禁止`P2/staging-9cc38ab27`は79ファイル・dirty=false・NODELETE・限定export・dataset hash不変。最初のpushは自動承認審査のtimeoutで未実行となり、実行環境で許された一度のSHA明示再試行で成功した。main操作/force/認証回避は行わない。最新mainは`b489fca1561bf12ff6b43205378220163d71c21c`のまま。
+
+当該SHAのLint `44000657268`、Linux limited `44000657263`、Zenz `44000657351`が成功。job logも読み、合成子probe PASSとSDK不要のserver_owner_test実行成功を確認した。Fcitx5 5.1.19 SDK不足により実API/SDK境界9ターゲットはNOT EXECUTEDで、成功stepを実API成功へ読み替えない。ローカル177ケースと実EventLoopの証拠とは分離する。
+
+追加レビューで、deadlineのkey readerがprivate属性は確認するがhardlink数を確認していないことを特定。通常file書込み側の単一link契約に対して不足があった。別のprivate profileへkeyをhardlinkし、同じ合成ELFのUID/PID/実行path/版が有効なケースを追加すると、拒否すべき接続FD 5が返り試験が失敗した（`resume-hardlink-red-20261117.log`）。実server/IME・実入力は使わず、元peerはfixtureのbirth pidfdで所有/回収する。
+
+`src/ipc/linux_deadline.cc`のfile fstatで`st_nlink == 1`を要求し、読取り前・接続前に拒否するよう修正。リンクをunlink/chmod/修復せず、既存peerへ終了要求も送らない。worker上の検証境界のままで、Fcitx loopへのfilesystem I/Oは追加しない。protocol/IPC framing/既定deadline値は変更しない。共通Linux readerのため専用設定ON/OFF双方を確認した。
+
+- ON：18ターゲット179成功・fixture入口2 skip。Ownerの別profile接続拒否とLinuxPeerの接続/送信拒否を追加し、元key/aliasのinode・link数2・mode・内容と、元peerの生存を確認。旧52ケースを含む既存資産も保持。36.189秒、RX上限1,089,381 bytes、peak 7,261,245,440 bytes。
+- OFF：既存6ターゲットと新規readerケース、62成功。30.040秒、RX上限5,965,081 bytes、peak 7,261,257,728 bytes。
+- ON staging構成復元：13.832秒、全18ターゲットは対応入力cacheを再利用。ON/OFF集計を別JSONに保存し混同しない。jobs=2・取得禁止・隔離HOME/XDG・既存cache・60GiB/取得2GiB制限を維持。
+
+検査時点のhardlink拒否を確認したもので、同UIDの能動的なmetadata差替えや全TOCTOU解消は未証明。コピーされた同一keyのprovenance、停止後の所有keyの安全な再利用、満杯時の入力順序/救済、永久I/O/runtime、実frontend/実serverと全6系統CIは引き続き未達・未検証。利用可能toolにworkflow dispatchはなく、gh導入/認証回避は行わない。factory常時拒否・Enabled=False、2A未完了・2B移行不可を維持して独立作業を継続する。

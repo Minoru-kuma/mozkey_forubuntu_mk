@@ -404,6 +404,25 @@ TEST_F(LinuxPeerTest, WrongExecutableAndExpiredConnectDoNotSend) {
   auto expired = NewLinuxDeadlineIPCClient(peer.endpoint, LinuxDeadline::After(LinuxDeadline::Now, 0ms));
   EXPECT_FALSE(expired->Connected()); EXPECT_EQ(peer.requests.load(), 0);
 }
+TEST_F(LinuxPeerTest, HardlinkedKeyCannotConnectOrSendAndIsNotRepaired) {
+  Peer peer;
+  const auto key = peer.endpoint.profile+"/."+peer.endpoint.channel+".ipc";
+  const auto alias = peer.endpoint.profile+"/key-alias";
+  struct stat before{}; ASSERT_EQ(stat(key.c_str(), &before), 0);
+  ASSERT_EQ(link(key.c_str(), alias.c_str()), 0);
+  const auto deadline = LinuxDeadline::After(LinuxDeadline::Now, 100ms);
+  auto ipc = NewLinuxDeadlineIPCClient(peer.endpoint, deadline);
+  EXPECT_FALSE(ipc->Connected());
+  const int fd = PrepareLinuxDeadlineSocket(peer.endpoint, deadline);
+  EXPECT_LT(fd, 0);
+  if (fd >= 0) close(fd);
+  EXPECT_EQ(peer.requests.load(), 0);
+  struct stat after{}, other{};
+  ASSERT_EQ(stat(key.c_str(), &after), 0); ASSERT_EQ(stat(alias.c_str(), &other), 0);
+  EXPECT_EQ(after.st_ino, before.st_ino); EXPECT_EQ(other.st_ino, before.st_ino);
+  EXPECT_EQ(after.st_nlink, 2); EXPECT_EQ(after.st_size, before.st_size);
+  EXPECT_EQ(after.st_mode, before.st_mode);
+}
 
 TEST_F(LinuxPeerTest, FullConnectQueueCannotBlockOrSend) {
   Peer peer(Peer::QueueFull);

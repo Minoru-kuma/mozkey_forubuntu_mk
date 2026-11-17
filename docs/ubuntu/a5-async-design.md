@@ -258,3 +258,8 @@ native supervisorは制御eventfd（process寿命で1個）、子pidfdとnonbloc
 原子的予約に成功した後の起動失敗/通常終了では、emptyまたは古いkeyが残る場合がある。新scopeからも自動削除/再起動を許可しないため、現段階は初回起動経路の部分実装である。所有を証明したkeyの再利用/失敗後復旧は未完了で、既存資産を削除して回避しない。実serverの保存/終了、永久exec I/O/worker/runtime、満杯時の入力順序と保留入力救済、実frontendと全6系統CIも未検証/未達。factoryを有効化しない。
 
 合成protocol fixtureはMozcServer/SessionServer/辞書/IMEを含まず、実profile/key protobuf/peer/executableの検証を通るELFだけを使う。SDK不要の11ケースでFD移譲、owner破棄、IC取消、既存peer非adopt、不正/古いkey保護、管理job起動禁止、暗黙再起動禁止を確認した。実Fcitx5 EventLoopの追加ケースでは350ms遅延中にheartbeatが進み、CREATE→SET_REQUEST→GET_CONFIG→SEND_KEYが一度ずつ処理された。約361msは初期化応答であり、実ひらがな表示300msやA5合格の証明ではない。
+
+
+### hardlink keyの読取り拒否（2026-11-17）
+
+deadline readerでもkey fileのlink数1を要求する。private directory/UID/modeだけでは、別private profileの同じkey inodeから実行path/PID/版の正しい別profileへ接続できるためである。実fixtureでこの誤接続を再現した後、接続/FD移譲/送信の拒否とkey/peer不変を確認した。新しいfilesystem処理をloopへ入れず、検証はworker上のまま。検査後の能動的差替え/全TOCTOUの解決やA5全体の合格を意味しない。

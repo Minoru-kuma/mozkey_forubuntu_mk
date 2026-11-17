@@ -19,6 +19,8 @@
 
 **所有scopeの製品接続：engine/client/poolへServerOwnerを共有し、未接続・key無しの場合だけ一度の起動を許可。既存peerは非adopt、管理保存からの起動/cleanupからの再起動を禁止し、IC取消とaddon終了を分離した。停止後keyの安全な再起動と入力救済等は未完了で、factory拒否と2A未完了を維持する。限定18ターゲット177成功・入口2 skip、合成子24シナリオ成功。**
 
+**2026-11-17再開：休止中の24ファイルを9cc38ab27へcommit/pushし、79ファイルの導入禁止stagingを作成。別profileへのhardlink key誤接続を再現しreader側でもlink数1を要求。ON179/OFF62成功。factory拒否・A5未達・2A未完了のまま承認済み残作業を継続する。**
+
 ユーザーの最新指示でA5は入力イベントループの長時間停止防止を中心に再設計。100ms/250msは参考測定値へ変更し、Fcitx5内の非同期IPCを優先する。設計・隔離PoC・故障注入と作業ブランチへの反映を承認。新受入基準は[レビュー案](docs/ubuntu/a5-async-design.md)であり、A5合格・製品統合・次工程は承認しない。以下の旧数値目標・停止理由は履歴として保持する。
 
 2026-11-11にCI workflowと開発運用文書の実行方針変更・限定検証・作業ブランチへのcommit/pushを承認。通常pushは軽量、Phase完了・main統合前は全6系統フルCIとする（[CI運用](docs/ubuntu/ci-policy.md)）。A5未達・工程1停止と後続Phaseの未承認状態は維持する。
