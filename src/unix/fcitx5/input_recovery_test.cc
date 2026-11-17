@@ -77,6 +77,49 @@ TEST(InputRecoveryTest, InspectionIsBoundedValidUtf8AndKeepsOriginalData) {
   EXPECT_LE(text.size(), 128); EXPECT_TRUE(fcitx::utf8::validate(text)); EXPECT_EQ(record->preedit, original);
   EXPECT_TRUE(InputRecovery::Inspect({record}, 0).empty());
 }
+TEST(InputRecoveryTest, InspectionPagesReachAllRecordsWithoutChangingRetainedInput) {
+  auto first = std::make_shared<RetainedInput>();
+  for (int i = 0; i < 20000; ++i) first->preedit += "あ";
+  auto last = std::make_shared<RetainedInput>();
+  last->preedit = "終端";
+  InputFrame frame; frame.raw = fcitx::Key(FcitxKey_z); frame.release = true;
+  last->pending.push_back(frame);
+  const auto original = first->preedit;
+  InputRecovery::Records records{first, last};
+  size_t offset = 0, pages = 0;
+  std::string inspected;
+  for (;;) {
+    const auto page = InputRecovery::InspectPage(records, offset, 127);
+    EXPECT_LE(page.text.size(), 127); EXPECT_TRUE(fcitx::utf8::validate(page.text));
+    inspected += page.text; ++pages;
+    if (!page.more) break;
+    ASSERT_GT(page.next_offset, offset); ASSERT_LT(pages, 1000);
+    offset = page.next_offset;
+  }
+  EXPECT_GT(pages, 1);
+  EXPECT_EQ(inspected, "\nRetained group 1\nReason: \nPreedit: "+original+
+      "\nRetained group 2\nReason: \nPreedit: 終端\nPending input: [release z]");
+  EXPECT_EQ(first->preedit, original); EXPECT_EQ(last->pending.size(), 1);
+  const auto past = InputRecovery::InspectPage(records, inspected.size()+100, 127);
+  EXPECT_TRUE(past.text.empty()); EXPECT_FALSE(past.more);
+}
+TEST(InputRecoveryTest, InspectionPagesPreserveUnknownOutcomeAndComposeOrder) {
+  const auto records = Example();
+  const auto one = InputRecovery::InspectPage(records, 0, 16384);
+  EXPECT_FALSE(one.more);
+  std::string joined; size_t offset = 0;
+  for (size_t pages = 0; pages < 100; ++pages) {
+    const auto page = InputRecovery::InspectPage(records, offset, 7);
+    EXPECT_LE(page.text.size(), 7); EXPECT_TRUE(fcitx::utf8::validate(page.text));
+    joined += page.text;
+    if (!page.more) break;
+    ASSERT_GT(page.next_offset, offset); offset = page.next_offset;
+  }
+  EXPECT_EQ(joined, one.text);
+  EXPECT_NE(joined.find("亜"), std::string::npos);
+  EXPECT_EQ(records[0]->outcome->result().value(), "亜");
+  EXPECT_TRUE(records[0]->delivering); EXPECT_EQ(records[0]->composing.size(), 1);
+}
 TEST(InputRecoveryTest, EncoderCannotReportSuccessForUnreadableFrameFields) {
   // Cover every location: pending, compose prefix and uncertain delivery.
   for (int location = 0; location < 3; ++location) {

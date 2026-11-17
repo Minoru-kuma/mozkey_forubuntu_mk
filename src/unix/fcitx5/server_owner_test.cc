@@ -111,6 +111,35 @@ TEST_F(ServerOwnerTest, FreshLaunchTransfersValidatedFdAndCancelsOwnedChild) {
   ASSERT_TRUE(Until([] { return !OwnedChild::Busy(); }));
   EXPECT_EQ(std::filesystem::exists(profile_+"/.fixture-shutdown"), graceful);
 }
+TEST_F(ServerOwnerTest, NewScopeReusesOnlyItsPersistentlyMarkedKeyWithoutReplacingInode) {
+  auto worker = Begin(); ASSERT_TRUE(worker);
+  const int first = Complete(worker); ASSERT_GE(first, 0); close(first);
+  struct stat before{}, marker{};
+  ASSERT_EQ(stat((profile_+"/.session.ipc").c_str(), &before), 0);
+  ASSERT_EQ(stat((profile_+"/.session.ipc.owner").c_str(), &marker), 0);
+  EXPECT_EQ(marker.st_mode & 07777, 0600); EXPECT_EQ(marker.st_nlink, 1);
+  const auto proof = Read(profile_+"/.session.ipc.owner"); ASSERT_FALSE(proof.empty());
+  owner_->Cancel(); ASSERT_TRUE(Until([] { return !OwnedChild::Busy(); }));
+  worker.reset(); owner_.reset();
+  auto next = Begin(); ASSERT_TRUE(next);
+  const int second = Complete(next); ASSERT_GE(second, 0); close(second);
+  EXPECT_TRUE(owner_->launch_attempted()); EXPECT_TRUE(owner_->owns_process());
+  struct stat after{}; ASSERT_EQ(stat((profile_+"/.session.ipc").c_str(), &after), 0);
+  EXPECT_EQ(after.st_dev, before.st_dev); EXPECT_EQ(after.st_ino, before.st_ino);
+  EXPECT_EQ(Read(profile_+"/.session.ipc.owner"), proof);
+}
+TEST_F(ServerOwnerTest, InvalidPersistentMarkerPreservesPreviouslyOwnedKeyWithoutRestart) {
+  auto worker = Begin(); ASSERT_TRUE(worker);
+  const int fd = Complete(worker); ASSERT_GE(fd, 0); close(fd);
+  owner_->Cancel(); ASSERT_TRUE(Until([] { return !OwnedChild::Busy(); }));
+  worker.reset(); owner_.reset();
+  const auto before = Read(profile_+"/.session.ipc");
+  { std::ofstream marker(profile_+"/.session.ipc.owner"); marker << "invalid-proof"; }
+  auto next = Begin(); ASSERT_TRUE(next);
+  EXPECT_EQ(Complete(next), -1); EXPECT_FALSE(owner_->launch_attempted());
+  EXPECT_EQ(Read(profile_+"/.session.ipc"), before);
+  EXPECT_EQ(Read(profile_+"/.session.ipc.owner"), "invalid-proof");
+}
 TEST_F(ServerOwnerTest, FiniteStartupDelayAndOwnerCancellationDoNotHandOffLateFd) {
   auto worker = Begin({"--pause350"}); ASSERT_TRUE(worker);
   ASSERT_TRUE(Until([&] { return owner_->owns_process() && std::filesystem::exists(profile_+"/.session.ipc"); }));

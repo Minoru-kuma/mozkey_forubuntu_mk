@@ -21,6 +21,9 @@ class OwnedChild {
     // key before any product I/O. An existing regular/symlink key fails closed.
     // Reservation failure never repairs, truncates or removes existing assets.
     bool fresh_key_only = false;
+    // Restart only a key created by an earlier owned bootstrap and bound to
+    // this profile by its persistent marker. Never migrates an unowned key.
+    bool reuse_owned_key = false;
   };
   // Worker only: validation and pidfd_spawn may block on filesystem/exec I/O.
   // ONE process-root reservation, plus an inherited private OFD launch lease,
@@ -39,6 +42,8 @@ class OwnedChild {
   // The reaper rechecks UID/PID before sending; it never performs filesystem I/O.
   bool ConfigureShutdownFromVerifiedConnection(int fd, const std::string& request);
   static bool Busy();
+  // Worker-only preflight. The child rechecks under its inherited launch lease.
+  static bool ReusableSessionKeyOnWorker(const std::string& profile);
   // Actual process termination only. Seal admission and join the native
   // supervisor within the caller's REMAINING budget, clamped to 390ms.
   // False means resources remain owned here; never claim they were reclaimed.

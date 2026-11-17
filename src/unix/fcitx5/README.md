@@ -1,32 +1,41 @@
 # Phase 2A Fcitx5 staging sources
 
-This is an incomplete opt-in Linux build. **Do not install or register it.**
-The addon definition has `Enabled=False` and the V2 factory always returns
-`nullptr`. Editing the configuration does not bypass this gate.
+This is a Phase 2B candidate, **not permission to install, register or load it**.
+The addon definition stays `Enabled=False`. The V2 factory constructs the
+asynchronous engine after the frozen Phase 2A code safety checks. Full CI for
+the final SHA and separate Phase 2B execution authorization remain required.
 
-The frontend now uses IO/Timer/Defer-driven RPC and a per-context asynchronous
-session. Profile/key/peer and dedicated configuration I/O run on the single
-owned preparation worker. Physical keys are recorded before consumption;
-late/failing replies suspend delivery and retain input in process memory.
-This is still **not input-safe enough to activate**. Bounded normal shutdown now
-seals admission, attempts a durable inspection snapshot and joins the native
-worker including TLS destruction. A timeout is a failure, never proof of cleanup.
-Compose prefixes and validated late responses are retained. Per-context clients
-retire known sessions through an addon-owned DELETE_SESSION queue; owner teardown
-cancels that queue without waiting. Empty contexts can prepare a fresh session on
-focus return. Rejected reconversion never deletes the selection; deletions require
-an exact surrounding snapshot and frontend capability.
+The frontend uses IO/Timer/Defer-driven RPC and one session per input context.
+Filesystem preparation runs on the single owned worker. The 16-frame queue
+records accepted keys before consumption. On overflow, accepted frames stay in
+order for inspection; new frames are rejected before acceptance and pass
+through without conversion. New pass-through input can appear before retained
+input is manually resolved, as explicitly allowed by the user. Retained or
+uncertain input is never automatically replayed. An explicit retry creates a
+fresh pipeline/session only for future input, preserving the old journal.
 
-Private snapshots are bounded to 1MiB, stored in `mozkey-recovery/` under the
-Fcitx PkgConfig directory (directory 0700, files 0600). They contain input/context
-in plaintext and are **not logs or encrypted storage**. Unique snapshots are never
-overwritten. A separate `latest` pointer supports explicit inspection after
-restart. Inspection never replays requests, keys or uncertain commits. A full
-archive browser, explicit resolution and bounded retention policy remain pending.
-Filesystem failure, shutdown budget expiry and snapshot-size refusal preserve
-memory while alive but do not guarantee process-exit recovery; activation remains
-blocked. Real frontend/IME/server startup and all six full CI suites are unverified.
-See `docs/ubuntu/phase-02-results.md` and `a5-async-design.md`.
+Show/Next retained input pages expose the whole suspended journal in bounded
+UTF-8 pages. Save and Read snapshot actions use private files (directory 0700,
+files 0600) in `mozkey-recovery/` under the Fcitx PkgConfig directory. Snapshots
+contain plaintext synthetic/user input and are not encrypted. Save failure is
+reported while input remains in memory; process-exit retention during storage
+failure is not guaranteed, an explicitly accepted future limitation.
+
+Normal shutdown shares a 390ms budget across child and worker cleanup. Exceeding
+it is recorded as uncollected, never cleanup success. Focus/IME changes never
+use this wait. Permanently stuck kernel I/O and comprehensive same-UID hostile
+manipulation proofs are outside Phase 2A. Known UAF, ordinary indefinite waits
+and concrete serious vulnerabilities remain prohibited.
+
+New owned launches record key provenance. A later scope reuses only a marked,
+unlocked private key with the same profile/key inode and birth time. Unmarked
+legacy keys are preserved and rejected; they are not silently migrated. Existing
+verified peers remain unowned and are never stopped by this addon. Platforms
+without key birth-time support fail closed and need separate evaluation.
+
+Real Fcitx loading, Wayland/X11, real input/display latency and frontend/server
+operation belong to Phase 2B. The frozen scope and evidence are in
+`AGENTS.md` and `docs/ubuntu/phase-02-results.md`.
 
 Build explicitly from `src/`, using the existing Phase 1 toolchain/cache and
 an isolated build HOME/XDG environment as recorded in the Phase 2 results:

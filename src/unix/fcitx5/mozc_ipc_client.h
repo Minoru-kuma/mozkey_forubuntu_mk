@@ -13,6 +13,7 @@ class MozcIPCClient final : public MozcClientInterface {
   ~MozcIPCClient() override { Cancel(); }
   bool Submit(mozc::commands::Input input, Done done) override;
   void Cancel() override;
+  bool IsCancelled() const override { return !session_ || session_->failed(); }
   bool EnsureConnection() override;
   bool GetConfig(mozc::config::Config* config) override { *config = config_; return have_config_; }
  private:

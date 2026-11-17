@@ -71,25 +71,15 @@ std::string uuidKey(InputContext* ic) {
 
 std::shared_ptr<MozcClientInterface> MozcClientPool::requestClient(
     InputContext* ic) {
-  std::string key;
-  switch (policy_) {
-    case PropertyPropagatePolicy::No:
-      key = uuidKey(ic);
-      break;
-    case PropertyPropagatePolicy::Program:
-      if (!ic->program().empty()) {
-        key = stringutils::concat("p:", ic->program());
-      } else {
-        key = uuidKey(ic);
-      }
-      break;
-    case PropertyPropagatePolicy::All:
-      key = "g:";
-      break;
-  }
+  // A server session contains composition state and cancellation ownership.
+  // Share mode settings according to policy_, but never share an async session
+  // between ICs: one context's focus change must not cancel another's input.
+  const std::string key = uuidKey(ic);
   auto iter = clients_.find(key);
   if (iter != clients_.end()) {
-    return iter->second.lock();
+    auto client = iter->second.lock();
+    if (client && !client->IsCancelled()) return client;
+    clients_.erase(iter);
   }
   std::unique_ptr<MozcClientInterface> newclient = createClient(loop_, cleanup_, prepare_);
   // Currently client capability is fixed.
@@ -107,7 +97,7 @@ std::shared_ptr<MozcClientInterface> MozcClientPool::registerClient(
       client.release(),
       [key, ref = this->watch()](MozcClientInterface* client) {
         if (auto* that = ref.get()) {
-          that->unregisterClient(key);
+          that->unregisterClient(key, client);
         }
         delete client;
       });
@@ -117,8 +107,13 @@ std::shared_ptr<MozcClientInterface> MozcClientPool::registerClient(
   return managedClient;
 }
 
-void MozcClientPool::unregisterClient(const std::string& key) {
-  clients_.erase(key);
+void MozcClientPool::unregisterClient(const std::string& key, const MozcClientInterface* client) {
+  const auto found = clients_.find(key);
+  if (found == clients_.end()) return;
+  const auto current = found->second.lock();
+  // A cancelled old client may outlive its replacement. Its deleter must not
+  // erase the new client's registration.
+  if (!current || current.get() == client) clients_.erase(found);
 }
 
 }  // namespace fcitx

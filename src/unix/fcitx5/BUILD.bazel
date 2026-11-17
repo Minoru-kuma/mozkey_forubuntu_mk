@@ -368,6 +368,8 @@ mozc_cc_test(
     }),
     deps = [
         ":fcitx_key_util",
+        ":mozc_client_pool",
+        ":mozc_ipc_client",
         ":surrounding_text_util",
         "//testing:gunit_main",
     ],

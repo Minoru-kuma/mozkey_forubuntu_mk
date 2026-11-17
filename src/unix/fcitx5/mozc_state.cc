@@ -83,7 +83,11 @@ void MozcState::CancelCallbacks() { ++epoch_; callbacks_.Invalidate(); }
 bool MozcState::EnsurePipeline() {
   if (pipeline_) return !pipeline_->suspended();
   retained_ = mozc::fcitx5::InputRetention::Reserve();
-  if (!retained_) { SetAuxString(_("Retained input limit reached")); return false; }
+  if (!retained_) {
+    SetAuxString(_("Retained input limit reached; new keys pass through without conversion"));
+    DrawAll(); return false;
+  }
+  ++pipeline_generation_;
   auto watch = ic_->watch();
   auto* client = GetClient();
   pipeline_ = std::make_unique<mozc::fcitx5::InputPipeline>(engine_->instance()->eventLoop(), retained_,
@@ -152,8 +156,9 @@ void MozcState::UpdatePreeditMethod() {
   mozc::commands::Input input; input.set_type(mozc::commands::Input::GET_CONFIG);
   const auto watch = ic_->watch();
   const auto weak = std::weak_ptr<int>(lifetime_);
-  GetClient()->Submit(std::move(input), [this, watch, weak](bool ok, auto output) {
-    if (weak.expired() || !watch.isValid()) return;
+  const auto generation = pipeline_generation_;
+  auto done = [this, watch, weak, generation](bool ok, mozc::commands::Output output) {
+    if (weak.expired() || !watch.isValid() || !pipeline_ || generation != pipeline_generation_) return;
     if (!ok || !output.has_config()) {
       const bool fallback = pipeline_->BeginUnsentFallback();
       if (weak.expired() || !watch.isValid()) return;
@@ -164,7 +169,8 @@ void MozcState::UpdatePreeditMethod() {
     }
     preedit_method_ = output.config().preedit_method();
     pipeline_->SetReady(true);
-  });
+  };
+  if (!GetClient()->Submit(std::move(input), done) && !weak.expired() && watch.isValid()) done(false, {});
 }
 void MozcState::ScheduleCallback(const mozc::commands::Output& output) {
   if (retained_ && retained_->delivering && retained_->delivering->generation != epoch_) return;
@@ -235,11 +241,26 @@ void MozcState::SelectCandidate(int id) {
 }
 void MozcState::Reset() {
   CancelCallbacks();
+  ++pipeline_generation_;
   if (pipeline_) pipeline_->Hold("context-reset");
   // Old input remains process-owned; reset never replays or silently clears it.
   pipeline_.reset(); retained_.reset(); client_.reset(); handler_->Clear();
   preedit_ = Text(); ic_->inputPanel().reset();
   engine_->instance()->resetCompose(ic_);
+}
+bool MozcState::RetryRetained() {
+  if (!ic_->hasFocus() || engine_->instance()->inputMethod(ic_) != "mozkey" ||
+      ic_->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive) ||
+      !pipeline_ || !pipeline_->suspended()) return false;
+  const auto weak = std::weak_ptr<int>(lifetime_);
+  const auto watch = ic_->watch();
+  // The process registry retains the old journal. This starts a new session
+  // for future keys; no old frame, preedit or uncertain outcome is submitted.
+  Reset();
+  if (weak.expired() || !watch.isValid()) return false;
+  if (!EnsurePipeline()) return false;
+  FocusIn();
+  return true;
 }
 bool MozcState::Paging(bool prev) {
   mozc::commands::SessionCommand command;
@@ -277,14 +298,25 @@ void MozcState::ShowRetained(bool inspect) {
       ic_->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
   // Automatic focus/key notices never expose input from other contexts.
   // Only the explicit inspection action may show the process-owned journal.
-  std::string text = _("Input retained; automatic delivery is suspended");
+  std::string text = _("Accepted input is retained; new keys pass through without conversion. Inspect or save retained input; retry conversion explicitly");
+  if (pipeline_ && pipeline_->suspended()) {
+    // Hide the former composition without deleting its journal. Invalidate
+    // an outer delivery if this notice was reached through UI reentry.
+    CancelCallbacks();
+    preedit_ = Text(); aux_.clear(); url_.clear();
+    ic_->inputPanel().reset();
+  }
   if (retained_ && retained_->reason == "initialization-raw-fallback" &&
       !retained_->delivering && !retained_->outcome) {
-    text = _("Conversion unavailable; unsent keys continue without conversion. Switch input method off and on to retry");
+    text = _("Conversion unavailable; unsent keys continue without conversion. Retry conversion explicitly");
   }
   if (inspect) text += mozc::fcitx5::InputRecovery::Inspect(mozc::fcitx5::InputRetention::Snapshot());
   ic_->inputPanel().setAuxUp(Text(text));
-  ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
+  const auto weak = std::weak_ptr<int>(lifetime_);
+  const auto watch = ic_->watch();
+  ic_->updatePreedit();
+  if (weak.expired() || !watch.isValid()) return;
+  watch.get()->updateUserInterface(UserInterfaceComponent::InputPanel);
 }
 
 std::function<bool()> MozcState::DeliveryValid() const {

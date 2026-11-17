@@ -19,6 +19,7 @@ class MozcClientInterface {
   virtual ~MozcClientInterface() = default;
   virtual bool Submit(mozc::commands::Input input, Done done) = 0;
   virtual void Cancel() = 0;
+  virtual bool IsCancelled() const { return false; } // Cached lifecycle only.
   virtual bool EnsureConnection() = 0; // Cached readiness query only; never waits.
   virtual bool GetConfig(mozc::config::Config* config) = 0; // Cache only.
   virtual void set_client_capability(const mozc::commands::Capability&) {}

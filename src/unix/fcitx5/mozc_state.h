@@ -106,6 +106,7 @@ class MozcState : public InputContextProperty {
 
   bool SendCommand(const mozc::commands::SessionCommand& session_command);
   void ShowRetained(bool inspect = false);
+  bool RetryRetained();
   void Shutdown();
 
   void SetUsage(const std::string& title, const std::string& description);
@@ -133,6 +134,7 @@ class MozcState : public InputContextProperty {
   mutable std::shared_ptr<MozcClientInterface> client_;
   mozc::fcitx5::CallbackQueue callbacks_;
   uint64_t epoch_ = 0;
+  uint64_t pipeline_generation_ = 0;
   std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
   std::optional<std::string> result_;
   std::optional<std::pair<int, unsigned>> deletion_;

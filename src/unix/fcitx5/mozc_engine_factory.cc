@@ -20,6 +20,7 @@
 #include <fcitx-utils/misc.h>
 #include <fcitx-utils/stringutils.h>
 #include <fcitx/addonfactory.h>
+#include <fcitx/addonmanager.h>
 #include <fcitx/addoninstance.h>
 
 #include <cstdlib>
@@ -30,11 +31,14 @@
 #include "unix/fcitx5/i18nwrapper.h"
 
 namespace fcitx {
-// This staging build is deliberately fail-closed until asynchronous key
-// consumption and preparation lifetime pass A5. No runtime opt-in bypass.
+// Phase 2A code safety is checked with isolated fixtures. Loading this factory
+// belongs to separately authorized Phase 2B; the addon stays disabled by default.
 class MozcEngineFactory : public AddonFactory {
  public:
-  AddonInstance* create(AddonManager*) override { return nullptr; }
+  AddonInstance* create(AddonManager* manager) override {
+    if (!manager || !manager->instance()) return nullptr;
+    return new MozcEngine(manager->instance());
+  }
 };
 }  // namespace fcitx
 

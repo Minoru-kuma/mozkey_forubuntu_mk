@@ -51,7 +51,10 @@ class InputPipeline {
                 Send send, std::function<void()> cancel,
                 std::function<bool()> valid, Deliver deliver);
   ~InputPipeline();
-  bool Submit(InputFrame frame); // true means original KeyEvent must be consumed.
+  // true reserves this frame before the original KeyEvent is consumed. false
+  // rejects it before acceptance: the caller may pass that original event on.
+  // A full queue freezes the accepted prefix; it never replays or drops it.
+  bool Submit(InputFrame frame);
   void SetReady(bool ready);
   // Initialization failure only: no preedit/outcome/compose or possibly sent
   // request. Drain known raw keys through the normal serialized delivery hook.

@@ -51,6 +51,7 @@
 #include "unix/fcitx5/server_owner.h"
 #include "unix/fcitx5/mozc_state.h"
 #include "unix/fcitx5/async_config.h"
+#include "unix/fcitx5/input_recovery.h"
 
 namespace fcitx {
 
@@ -136,6 +137,8 @@ class MozcEngine final : public InputMethodEngineV2 {
   void SyncData(bool force);
   void SaveRetained(InputContext* ic);
   void ReadSavedRetained(InputContext* ic);
+  void InspectRetained(InputContext* ic);
+  void NextRetainedPage(InputContext* ic);
 
   bool deactivating() const { return deactivating_; }
   auto* parser() const { return parser_.get(); }
@@ -143,6 +146,7 @@ class MozcEngine final : public InputMethodEngineV2 {
 
  private:
   void ResetClientPool();
+  void BeginInspection(InputContext* ic, mozc::fcitx5::InputRecovery::Records records, bool saved);
   PropertyPropagatePolicy GetSharedStatePolicy();
 
   std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
@@ -163,7 +167,11 @@ class MozcEngine final : public InputMethodEngineV2 {
 
   SimpleAction configToolAction_, dictionaryToolAction_, addWordAction_,
       aboutAction_;
-  SimpleAction separatorAction_, recoveryAction_, saveRecoveryAction_, readRecoveryAction_;
+  SimpleAction separatorAction_, recoveryAction_, saveRecoveryAction_, readRecoveryAction_, nextRecoveryAction_, retryRecoveryAction_;
+  mozc::fcitx5::InputRecovery::Records inspectionRecords_;
+  std::function<bool(InputContext*)> inspectionValid_;
+  size_t inspectionOffset_ = 0, inspectionPage_ = 0;
+  bool inspectionMore_ = false, inspectionSaved_ = false;
   Menu toolMenu_;
   MozcEngineConfig config_;
   bool deactivating_ = false;

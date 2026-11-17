@@ -79,10 +79,12 @@ PreparationWorker::Job ServerOwner::PreparationJob(bool allow_launch) const {
       struct stat info{};
       const int result = fstatat(directory, ".session.ipc", &info, AT_SYMLINK_NOFOLLOW);
       const int error = errno; close(directory);
-      if (result == 0 || error != ENOENT || deadline.Expired()) return -1;
+      const bool reuse_owned = result == 0 && OwnedChild::ReusableSessionKeyOnWorker(endpoint.profile);
+      if ((result == 0 && !reuse_owned) || (result != 0 && error != ENOENT) || deadline.Expired()) return -1;
       state->attempted.store(true);
       OwnedChild::Spec spec{endpoint.server_path, endpoint.profile, state->arguments, {}};
-      spec.fresh_key_only = true;
+      spec.fresh_key_only = !reuse_owned;
+      spec.reuse_owned_key = reuse_owned;
       for (const char* key : {"HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "XDG_CACHE_HOME", "XDG_DATA_HOME"})
         if (const char* value = std::getenv(key)) spec.environment.push_back(std::string(key)+"="+value);
       if (deadline.Expired()) return -1;

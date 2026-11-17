@@ -15,6 +15,15 @@ class InputRecovery {
   using Records = std::vector<std::shared_ptr<const RetainedInput>>;
   static bool Encode(const Records& records, std::string* bytes);
   static bool Decode(const std::string& bytes, Records* records);
+  struct InspectionPage {
+    std::string text;
+    size_t next_offset = 0;
+    bool more = false;
+  };
+  // Offsets address the inspection text, never an executable input sequence.
+  // Use a limit of at least four bytes so every UTF-8 character can progress.
+  static InspectionPage InspectPage(const Records& records, size_t offset = 0,
+                                    size_t limit = 16384);
   static std::string Inspect(const Records& records, size_t limit = 16384);
   static AsyncConfigFile::Options FileOptions(std::string filename);
   static bool ValidFilename(const std::string& name);

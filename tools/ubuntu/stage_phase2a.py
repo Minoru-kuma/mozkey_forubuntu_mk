@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Copy an opt-in build to an empty work directory, without executing an IME.
 
-This creates an INCOMPLETE staging snapshot, not an installable release.
-The addon is disabled and its factory refuses loading until A5 is integrated.
+This creates an audit snapshot, never permission to install or run an IME.
+A connected factory is a Phase 2B candidate pending full CI and authorization.
 """
 import argparse
 import hashlib
@@ -87,12 +87,19 @@ def stage(checkout, binary_root, output):
             raise ValueError(f'Missing build/source input: {source}')
     if 'Enabled=False' not in (frontend / 'mozkey-addon.conf').read_text():
         raise ValueError('Unreviewed addon must remain disabled')
+    factory_source = (frontend / 'mozc_engine_factory.cc').read_text()
+    factory_connected = 'return new MozcEngine(manager->instance());' in factory_source
+    if not factory_connected and 'return nullptr;' not in factory_source:
+        raise ValueError('Unknown factory state; refusing to label staging')
+    status = ('PHASE2B_CANDIDATE_PENDING_FULL_CI' if factory_connected
+              else 'INCOMPLETE_NOT_FOR_IME_LOAD')
     elf = {target: inspect_elf(source, target.endswith('.so'))
            for target, source in mappings.items()
            if target.endswith('.so') or target.startswith('usr/lib/mozkey/')}
     manifest = {
-        'status': 'INCOMPLETE_NOT_FOR_IME_LOAD',
-        'addon_factory': 'refuses loading; A5 integration pending',
+        'status': status,
+        'addon_factory': ('connected; addon disabled; full CI and Phase 2B authorization required'
+                          if factory_connected else 'refuses loading; A5 integration pending'),
         'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=checkout, text=True).strip(),
         'dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=checkout)),
         'platform': platform.platform(),
@@ -117,8 +124,8 @@ def stage(checkout, binary_root, output):
                                       'bytes': destination.stat().st_size})
         (tree / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
         (tree / 'NOT_READY_FOR_IME_LOAD.txt').write_text(
-            'Phase 2A incomplete. Do not install or register this snapshot.\n'
-            'The addon is disabled and its factory refuses loading.\n')
+            'Do not install, register or load this audit snapshot without authorization.\n'
+            'The addon is disabled. Factory state and pending gates are in manifest.json.\n')
         if output.exists():
             raise ValueError('Output appeared during staging; refusing overwrite')
         tree.rename(output)

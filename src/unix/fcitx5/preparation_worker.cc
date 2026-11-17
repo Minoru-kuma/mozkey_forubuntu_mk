@@ -171,7 +171,18 @@ bool PreparationWorker::WaitForProcessExit(std::chrono::milliseconds budget) {
   auto& root = ProcessRoot();
   root.sealed.store(true);
   std::unique_lock lock(root.mutex, std::try_to_lock);
-  if (!lock.owns_lock()) { root.final_cancelled.store(true); return false; }
+  // Completion publication briefly owns this mutex. A single try_lock can
+  // otherwise report an immediate failure even with nearly the whole exit
+  // budget remaining. Retry only within the original shared deadline; this is
+  // the process-exit path, never a focus/IME-switch wait.
+  while (!lock.owns_lock()) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= end) { root.final_cancelled.store(true); return false; }
+    std::this_thread::sleep_for(std::min(end-now,
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(1ms)));
+    if (std::chrono::steady_clock::now() >= end) { root.final_cancelled.store(true); return false; }
+    if (lock.try_lock()) break;
+  }
   if (root.slot) root.slot->cancelled.store(true);
   lock.unlock();
   root.ready.notify_one();

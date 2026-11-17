@@ -89,10 +89,16 @@ TEST(InputPipelineTest, DestroyedContextKeepsRawInputAndRejectsLateCallback) {
   EXPECT_EQ(f.record->pending.size(), 1); EXPECT_EQ(f.applied, 0); EXPECT_EQ(f.forwarded, 0);
 }
 TEST(InputPipelineTest, BoundedQueueProtectsPreviouslyConsumedInput) {
-  Fixture f; for (int i=0; i<16; ++i) ASSERT_TRUE(f.pipeline->Submit(Frame('a')));
+  Fixture f; for (int i=0; i<16; ++i) ASSERT_TRUE(f.pipeline->Submit(Frame('a'+i)));
   EXPECT_FALSE(f.pipeline->Submit(Frame('b')));
   EXPECT_EQ(f.record->pending.size(), 16); EXPECT_TRUE(f.record->suspended);
   EXPECT_EQ(f.sent, 0); EXPECT_EQ(f.forwarded, 0);
+  EXPECT_EQ(f.record->reason, "input-queue-full");
+  EXPECT_FALSE(f.pipeline->Submit(Frame('z')));
+  f.pipeline->SetReady(true); EXPECT_FALSE(f.pipeline->BeginUnsentFallback());
+  for (int i=0; i<16; ++i) EXPECT_EQ(f.record->pending[i].raw.sym(), 'a'+i);
+  f.pipeline.reset();
+  EXPECT_EQ(f.record->pending.size(), 16); EXPECT_EQ(f.record->reason, "input-queue-full");
 }
 // The installed sd-event backend does not permit nested/restarted exec().
 // Use the public SDK backend interface for deterministic reentry injection;
@@ -136,6 +142,47 @@ class ReentrantDeferLoop final : public fcitx::EventLoopInterface {
  private:
   std::deque<std::weak_ptr<Tick>> queue;
 };
+TEST(InputPipelineTest, FullQueueFreezesInflightInputAndFreshPipelineNeverReplaysIt) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend));
+  ASSERT_TRUE(f.pipeline->Submit(Frame('a'))); ASSERT_TRUE(scheduler->Step());
+  EXPECT_EQ(f.sent, 1); ASSERT_TRUE(f.complete);
+  for (int i=1; i<16; ++i) ASSERT_TRUE(f.pipeline->Submit(Frame('a'+i)));
+  EXPECT_FALSE(f.pipeline->Submit(Frame('z')));
+  f.record->preedit = "retained-fixture";
+  f.Reply(true); // A cancelled, possibly applied request must never be replayed.
+  EXPECT_EQ(f.applied, 0); EXPECT_EQ(f.record->pending.size(), 16);
+  EXPECT_FALSE(scheduler->Step());
+  auto old = f.record;
+  f.pipeline.reset();
+  auto fresh = InputRetention::Reserve(); ASSERT_TRUE(fresh);
+  auto pipeline = std::make_unique<InputPipeline>(f.loop, fresh,
+      [&](auto input, auto done) { ++f.sent; EXPECT_EQ(input.key().key_code(), 'x'); f.complete = std::move(done); return true; },
+      [] {}, [] { return true; }, [](auto, auto) { return true; });
+  ASSERT_TRUE(pipeline->Submit(Frame('x'))); ASSERT_TRUE(scheduler->Step());
+  f.Reply(true); EXPECT_EQ(f.sent, 2); EXPECT_TRUE(fresh->pending.empty());
+  EXPECT_EQ(old->pending.size(), 16); EXPECT_EQ(old->preedit, "retained-fixture");
+  for (int i=0; i<16; ++i) EXPECT_EQ(old->pending[i].raw.sym(), 'a'+i);
+  pipeline.reset(); InputRetention::ReleaseEmpty(fresh);
+}
+TEST(InputPipelineTest, QueueFullDuringReentrantDeliveryPreservesUncertainFrameAndOutcome) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend));
+  for (int i=0; i<16; ++i) ASSERT_TRUE(f.pipeline->Submit(Frame('a'+i)));
+  ASSERT_TRUE(scheduler->Step());
+  f.during_delivery = [&] {
+    ASSERT_TRUE(f.pipeline->Submit(Frame('q'))); // Current delivering frame freed one pending slot.
+    EXPECT_FALSE(f.pipeline->Submit(Frame('z')));
+    EXPECT_FALSE(scheduler->Step());
+  };
+  f.Reply(true);
+  EXPECT_TRUE(f.record->suspended); EXPECT_EQ(f.record->reason, "input-queue-full");
+  ASSERT_TRUE(f.record->delivering); EXPECT_EQ(f.record->delivering->raw.sym(), 'a');
+  ASSERT_TRUE(f.record->outcome); EXPECT_TRUE(f.record->outcome->consumed());
+  ASSERT_EQ(f.record->pending.size(), 16);
+  for (int i=0; i<16; ++i) EXPECT_EQ(f.record->pending[i].raw.sym(), 'b'+i);
+  EXPECT_FALSE(scheduler->Step()); EXPECT_EQ(f.sent, 1);
+}
 TEST(InputPipelineTest, NestedDispatchCannotStartNextFrameDuringDelivery) {
   auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
   Fixture f(std::move(backend));

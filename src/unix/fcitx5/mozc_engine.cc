@@ -183,7 +183,7 @@ MozcEngine::MozcEngine(Instance* instance)
   instance_->userInterfaceManager().registerAction("mozkey-retained-input", &recoveryAction_);
   recoveryAction_.setShortText(_("Show retained input"));
   recoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) {
-    if (ic && instance_->inputMethod(ic) == "mozkey") mozcState(ic)->ShowRetained(true);
+    InspectRetained(ic);
   });
   toolMenu_.addAction(&recoveryAction_);
   instance_->userInterfaceManager().registerAction("mozkey-save-retained-input", &saveRecoveryAction_);
@@ -194,6 +194,17 @@ MozcEngine::MozcEngine(Instance* instance)
   readRecoveryAction_.setShortText(_("Inspect saved input snapshot"));
   readRecoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) { ReadSavedRetained(ic); });
   toolMenu_.addAction(&readRecoveryAction_);
+  instance_->userInterfaceManager().registerAction("mozkey-next-retained-input", &nextRecoveryAction_);
+  nextRecoveryAction_.setShortText(_("Next retained input page"));
+  nextRecoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) { NextRetainedPage(ic); });
+  toolMenu_.addAction(&nextRecoveryAction_);
+  instance_->userInterfaceManager().registerAction("mozkey-retry-conversion", &retryRecoveryAction_);
+  retryRecoveryAction_.setShortText(_("Retry conversion for new input"));
+  retryRecoveryAction_.connect<SimpleAction::Activated>([this](InputContext* ic) {
+    if (ic && ic->hasFocus() && instance_->inputMethod(ic) == "mozkey" &&
+        !ic->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) mozcState(ic)->RetryRetained();
+  });
+  toolMenu_.addAction(&retryRecoveryAction_);
   toolAction_.setMenu(&toolMenu_);
 
   globalConfigReloadHandle_ =
@@ -433,21 +444,60 @@ void MozcEngine::ReadSavedRetained(InputContext* ic) {
   const auto root = StandardPath::global().userDirectory(StandardPath::Type::PkgConfig);
   recoveryIo_.reset();
   recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, std::nullopt,
-      [this, weak, root, show](bool ok, auto filename) {
+      [this, weak, root, watch, eligible, show](bool ok, auto filename) {
         if (weak.expired()) return;
         if (!ok || !mozc::fcitx5::InputRecovery::ValidFilename(filename)) {
           show(_("No readable input snapshot is available")); return;
         }
         recoveryIo_ = std::make_unique<mozc::fcitx5::AsyncConfigFile>(instance_->eventLoop(), root, std::nullopt,
-            [show](bool read, auto bytes) {
+            [this, weak, watch, eligible, show](bool read, auto bytes) {
               mozc::fcitx5::InputRecovery::Records records;
               if (!read || !mozc::fcitx5::InputRecovery::Decode(bytes, &records)) {
                 show(_("Input snapshot is unreadable; the saved file was preserved")); return;
               }
-              std::string text = _("Saved input for inspection only; delivery outcome may be uncertain");
-              text += mozc::fcitx5::InputRecovery::Inspect(records);
-              show(std::move(text));
+              if (weak.expired() || !watch.isValid() || !eligible()) return;
+              BeginInspection(watch.get(), std::move(records), true);
             }, mozc::fcitx5::InputRecovery::FileOptions(filename));
       }, SnapshotIndexOptions());
+}
+void MozcEngine::InspectRetained(InputContext* ic) {
+  if (!ic || !ic->hasFocus() || instance_->inputMethod(ic) != "mozkey" ||
+      ic->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+  auto records = mozc::fcitx5::InputRetention::Snapshot();
+  // A suspended journal cannot drain or accept further input. Keep shared
+  // references instead of copying unbounded active input on the event loop.
+  records.erase(std::remove_if(records.begin(), records.end(), [](const auto& record) {
+    return !record->suspended;
+  }), records.end());
+  BeginInspection(ic, std::move(records), false);
+}
+void MozcEngine::BeginInspection(InputContext* ic,
+    mozc::fcitx5::InputRecovery::Records records, bool saved) {
+  if (!ic || !ic->hasFocus() || instance_->inputMethod(ic) != "mozkey" ||
+      ic->capabilityFlags().testAny(CapabilityFlag::PasswordOrSensitive)) return;
+  const auto watch = ic->watch();
+  const auto eligible = mozcState(ic)->DeliveryValid();
+  inspectionValid_ = [watch, eligible](InputContext* destination) {
+    return watch.get() == destination && eligible();
+  };
+  inspectionRecords_ = std::move(records);
+  inspectionOffset_ = inspectionPage_ = 0;
+  inspectionSaved_ = saved; inspectionMore_ = true;
+  NextRetainedPage(ic);
+}
+void MozcEngine::NextRetainedPage(InputContext* ic) {
+  if (!ic || !inspectionMore_ || !inspectionValid_ || !inspectionValid_(ic)) return;
+  const auto page = mozc::fcitx5::InputRecovery::InspectPage(inspectionRecords_, inspectionOffset_);
+  inspectionOffset_ = page.next_offset; inspectionMore_ = page.more; ++inspectionPage_;
+  std::string text = inspectionSaved_ ? _("Saved input for inspection only; delivery outcome may be uncertain") :
+      _("Retained input for inspection only; delivery outcome may be uncertain");
+  text += "\n" + std::string(_("Page")) + " " + std::to_string(inspectionPage_);
+  text += page.more ? " — " + std::string(_("Use Next retained input page to continue")) :
+      " — " + std::string(_("End of retained input"));
+  text += page.text;
+  const auto watch = ic->watch();
+  ic->inputPanel().setAuxUp(Text(std::move(text)));
+  // This is the final external effect; it may destroy the context or engine.
+  watch.get()->updateUserInterface(UserInterfaceComponent::InputPanel);
 }
 }  // namespace fcitx

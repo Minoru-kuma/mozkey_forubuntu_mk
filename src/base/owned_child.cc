@@ -67,6 +67,50 @@ int Image(const std::string& path) {
       (header.e_type != ET_EXEC && header.e_type != ET_DYN)) { errno = EPERM; return -1; }
   return fcntl(directory.value, F_DUPFD_CLOEXEC, 5);
 }
+bool PrivateFile(int fd, struct stat* info) {
+  return fd >= 0 && !fstat(fd, info) && S_ISREG(info->st_mode) &&
+      info->st_uid == geteuid() && info->st_nlink == 1 && (info->st_mode & 07777) == 0600;
+}
+std::string SessionOwnership(int directory, int key) {
+  struct stat parent{}, file{}; struct statx birth{};
+  if (fstat(directory, &parent) || !PrivateFile(key, &file) ||
+      statx(key, "", AT_EMPTY_PATH, STATX_BTIME, &birth) || !(birth.stx_mask & STATX_BTIME)) return {};
+  // Birth time distinguishes a later inode allocation after accidental removal.
+  // This marker is a bootstrap provenance record, not protection from a hostile UID.
+  return "MOZKEY-OWNED-SESSION-1\n" + std::to_string(static_cast<uint64_t>(parent.st_dev)) + " " +
+      std::to_string(static_cast<uint64_t>(parent.st_ino)) + " " +
+      std::to_string(static_cast<uint64_t>(file.st_dev)) + " " +
+      std::to_string(static_cast<uint64_t>(file.st_ino)) + " " +
+      std::to_string(birth.stx_btime.tv_sec) + " " + std::to_string(birth.stx_btime.tv_nsec) + "\n";
+}
+bool VerifySessionOwnership(int directory, int key) {
+  const auto expected = SessionOwnership(directory, key);
+  Fd marker(openat(directory, ".session.ipc.owner", O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
+  struct stat info{}; char bytes[256];
+  if (expected.empty() || expected.size() >= sizeof(bytes) || !PrivateFile(marker.value, &info) ||
+      info.st_size != static_cast<off_t>(expected.size()) ||
+      pread(marker.value, bytes, expected.size(), 0) != static_cast<ssize_t>(expected.size()) ||
+      std::string_view(bytes, expected.size()) != expected) return false;
+  struct flock lock{}; lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET;
+  return fcntl(key, F_OFD_SETLK, &lock) == 0;
+}
+bool CreateSessionOwnership(int directory, int key) {
+  const auto bytes = SessionOwnership(directory, key);
+  if (bytes.empty()) return false;
+  Fd marker(openat(directory, ".session.ipc.owner",
+      O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600));
+  struct stat info{};
+  if (!PrivateFile(marker.value, &info)) return false;
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const auto written = write(marker.value, bytes.data()+offset, bytes.size()-offset);
+    if (written < 0 && errno == EINTR) continue;
+    if (written <= 0) return false;
+    offset += written;
+  }
+  // Any incomplete reservation/marker survives failure and remains fail-closed.
+  return fsync(marker.value) == 0 && fsync(directory) == 0;
+}
 void Wake(int fd) {
   if (fd < 0) return;
   uint64_t one = 1; ssize_t result;
@@ -221,7 +265,7 @@ struct OwnedChild::Root {
 };
 OwnedChild::Root& OwnedChild::ProcessRoot() { static auto* root = new Root; return *root; }
 std::shared_ptr<OwnedChild> OwnedChild::SpawnOnWorker(Spec spec, std::shared_ptr<std::atomic<bool>> cancelled) {
-  if (!cancelled || cancelled->load() || getuid() != geteuid() || spec.profile.size() > 4096 || spec.arguments.size() > 16 || spec.environment.size() > 32) return {};
+  if (!cancelled || cancelled->load() || getuid() != geteuid() || spec.profile.size() > 4096 || spec.arguments.size() > 16 || spec.environment.size() > 32 || (spec.fresh_key_only && spec.reuse_owned_key)) return {};
   auto state = std::make_shared<State>(std::move(cancelled));
   auto handle = std::shared_ptr<OwnedChild>(new OwnedChild(state));
   auto& root = ProcessRoot();
@@ -243,6 +287,7 @@ std::shared_ptr<OwnedChild> OwnedChild::SpawnOnWorker(Spec spec, std::shared_ptr
     Fd high_null(fcntl(null.value, F_DUPFD_CLOEXEC, 5)); if (high_null.value < 0) return fail(errno);
     std::vector<std::string> argv{spec.executable, "--mozkey-owned-parent="+std::to_string(getpid()), "--mozkey-owned-profile="+spec.profile};
     if (spec.fresh_key_only) argv.push_back("--mozkey-owned-fresh-key");
+    if (spec.reuse_owned_key) argv.push_back("--mozkey-owned-reuse-key");
     for (auto& arg : spec.arguments) { if (arg.size() > 4096 || arg.find('\0') != arg.npos || arg.starts_with("--mozkey-owned-")) return fail(EINVAL); argv.push_back(std::move(arg)); }
     std::vector<char*> args; for (auto& arg : argv) args.push_back(arg.data()); args.push_back(nullptr);
     std::vector<std::string> environment;
@@ -315,19 +360,27 @@ bool OwnedChild::WaitForProcessExit(std::chrono::milliseconds budget) {
     std::this_thread::sleep_for(std::min(end-Clock::now(), std::chrono::duration_cast<Clock::duration>(1ms)));
   }
 }
+bool OwnedChild::ReusableSessionKeyOnWorker(const std::string& profile) {
+  Fd directory(OpenMozkeyProfileDirectory(profile));
+  if (directory.value < 0) return false;
+  Fd key(openat(directory.value, ".session.ipc", O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
+  return key.value >= 0 && VerifySessionOwnership(directory.value, key.value);
+}
 bool InitializeOwnedChild(int* argc, char* argv[], std::string* profile) {
   if (!profile || !argc || *argc < 1 || !argv) return false;
   profile->clear();
-  std::string parent, root; bool seen_parent = false, seen_root = false, fresh_key = false;
+  std::string parent, root; bool seen_parent = false, seen_root = false, fresh_key = false, reuse_key = false;
   for (int i=1; i<*argc; ++i) {
     if (!argv[i]) return false;
     const std::string_view arg(argv[i]);
     if (arg.starts_with("--mozkey-owned-parent=")) { if (seen_parent) return false; seen_parent = true; parent = arg.substr(22); }
     else if (arg.starts_with("--mozkey-owned-profile=")) { if (seen_root) return false; seen_root = true; root = arg.substr(23); }
     else if (arg == "--mozkey-owned-fresh-key") { if (fresh_key) return false; fresh_key = true; }
+    else if (arg == "--mozkey-owned-reuse-key") { if (reuse_key) return false; reuse_key = true; }
     else if (arg.starts_with("--mozkey-owned-")) return false;
   }
-  if (!seen_parent && !seen_root) return !fresh_key;
+  if (fresh_key && reuse_key) return false;
+  if (!seen_parent && !seen_root) return !fresh_key && !reuse_key;
   int pid = 0; const auto parsed = std::from_chars(parent.data(), parent.data()+parent.size(), pid);
   if (!seen_parent || !seen_root || parent.empty() || root.empty() || parsed.ec != std::errc{} || parsed.ptr != parent.data()+parent.size() || pid <= 1 ||
       prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != pid) return false;
@@ -344,14 +397,20 @@ bool InitializeOwnedChild(int* argc, char* argv[], std::string* profile) {
   if (fresh_key) {
     // The parent-side absence check is not sufficient: another writer could
     // create a key before exec. Reserve it atomically before InitMozc/server.
-    // A failed/cancelled first launch may leave this empty reservation behind;
-    // never erase it or treat an arbitrary existing key as permission to retry.
+    // Record provenance only for this newly reserved inode. A failed marker
+    // write is never repaired by adopting an arbitrary existing key.
     Fd key(openat(directory.value, ".session.ipc",
         O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600));
     struct stat key_info{};
     if (key.value < 0 || fstat(key.value, &key_info) || !S_ISREG(key_info.st_mode) ||
         key_info.st_uid != geteuid() || key_info.st_nlink != 1 ||
-        (key_info.st_mode & 07777) != 0600) return false;
+        (key_info.st_mode & 07777) != 0600 ||
+        !CreateSessionOwnership(directory.value, key.value)) return false;
+  } else if (reuse_key) {
+    Fd key(openat(directory.value, ".session.ipc", O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
+    if (key.value < 0 || !VerifySessionOwnership(directory.value, key.value)) return false;
+    // No key bytes are changed here. ProcessMutex takes its own OFD lock
+    // before writing the new server endpoint through the same stable inode.
   }
   close(3);
   int output = 1;

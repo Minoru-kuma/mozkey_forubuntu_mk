@@ -59,8 +59,9 @@ InputPipeline::~InputPipeline() {
 }
 void InputPipeline::Hold(std::string reason) {
   ++token_; defer_.reset(); active_ = false;
+  // Preserve the first failure's provenance through focus/reset/destruction.
+  if (!record_->suspended) record_->reason = std::move(reason);
   record_->suspended = true;
-  record_->reason = std::move(reason);
   cancel_(); // AsyncSession cancel closes sources/FDs; never joins or sends.
 }
 bool InputPipeline::Submit(InputFrame frame) {

@@ -122,30 +122,58 @@ bool InputRecovery::Decode(const std::string& bytes, Records* records) {
   }
   *records = std::move(result); return true;
 }
-std::string InputRecovery::Inspect(const Records& records, size_t limit) {
-  std::string text;
+InputRecovery::InspectionPage InputRecovery::InspectPage(
+    const Records& records, size_t offset, size_t limit) {
+  InspectionPage page; page.next_offset = offset;
+  limit = std::min(limit, size_t{16384});
+  size_t position = 0;
+  bool full = false;
   auto append = [&](std::string_view value) {
-    size_t count = std::min(value.size(), limit-text.size());
-    // Keep the UI slice bounded and on a UTF-8 boundary; never alter the saved data.
-    while (count && count < value.size() && (static_cast<unsigned char>(value[count]) & 0xc0) == 0x80) --count;
-    const auto part = value.substr(0, count);
-    if (fcitx::utf8::validate(part)) text.append(part);
+    if (full) return;
+    if (!fcitx::utf8::validate(value)) value = " [invalid UTF-8 data retained]";
+    const size_t start = position;
+    position += value.size();
+    if (position <= offset) return;
+    size_t skip = offset > start ? offset - start : 0;
+    // An arbitrary caller offset must not expose a UTF-8 continuation byte.
+    while (skip < value.size() && (static_cast<unsigned char>(value[skip]) & 0xc0) == 0x80) ++skip;
+    auto remaining = value.substr(skip);
+    size_t count = std::min(remaining.size(), limit-page.text.size());
+    while (count && count < remaining.size() &&
+           (static_cast<unsigned char>(remaining[count]) & 0xc0) == 0x80) --count;
+    page.text.append(remaining.substr(0, count));
+    page.next_offset = start + skip + count;
+    if (count < remaining.size()) { page.more = true; full = true; }
   };
   auto frame = [&](const InputFrame& item) {
-    append(" ["); append(item.raw.toString()); append("]");
+    if (full) return;
+    append(item.release ? " [release " : " [press ");
+    append(item.raw.toString()); append("]");
     if (!item.composed_text.empty()) { append(" "); append(item.composed_text); }
   };
+  size_t group = 0;
   for (const auto& record : records) {
-    if (!record || text.size() >= limit) break;
-    append("\n"); append(record->preedit);
+    if (full) break;
+    if (!record) continue;
+    append("\nRetained group "); append(std::to_string(++group));
+    append("\nReason: "); append(record->reason);
+    append("\nPreedit: "); append(record->preedit);
     if (record->outcome && record->outcome->has_result()) {
-      append("\n"); append(record->outcome->result().value());
+      append("\nOutcome (may already have been applied): ");
+      append(record->outcome->result().value());
     }
-    if (record->delivering) frame(*record->delivering);
-    for (const auto& item : record->composing) { if (text.size() >= limit) break; frame(item); }
-    for (const auto& item : record->pending) { if (text.size() >= limit) break; frame(item); }
+    if (record->delivering) {
+      append("\nDelivery (outcome uncertain):"); frame(*record->delivering);
+    }
+    if (!record->composing.empty()) append("\nCompose prefix:");
+    for (const auto& item : record->composing) frame(item);
+    if (!record->pending.empty()) append("\nPending input:");
+    for (const auto& item : record->pending) frame(item);
   }
-  return text;
+  return page;
+}
+std::string InputRecovery::Inspect(const Records& records, size_t limit) {
+  return InspectPage(records, 0, limit).text;
 }
 std::shared_ptr<InputRecovery::ExitSave> InputRecovery::QueueForExit(
     std::string root, std::string filename, const Records& records) {

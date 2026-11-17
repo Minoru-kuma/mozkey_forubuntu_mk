@@ -1082,3 +1082,47 @@ FocusInが自動投入するmode設定が先頭にあるため、単なるphysic
 満杯経路も設計レビューした。初期化中の16件目からfallbackへ切り替えるだけでは、fallback Defer未処理/配送hook再入時にも再び満杯となり17件目が先行する。上限増加・破棄・送信済みreplay・frontend専用block API流用は採用しない。一般満杯時の順序/回復は未解決で、今回queue動作を変更しない。
 
 保存不能時の完全保全、手動救済、停止後自己所有keyの再利用、永久filesystem/exec I/O・worker/runtime終了、実frontend/実serverと最終SHA全6系統CIは未達・未検証。今回の変更は保存成功の条件を厳密にする限定改善であり、A5/2A合格ではない。factory常時nullptr・Enabled=False、2A未完了・2B移行不可を維持する。実IME/server/tool起動、既存IME/システム設定変更、main統合、新規取得/ツール導入は行っていない。最終SHAのstaging/remote/CI結果は完了報告と新規ローカルログへ記録する。
+
+
+## 2026-11-17受入範囲凍結と2A残実装の最終監査
+
+基点`a17c8286dc78bac7fe71d1a4e5ac640559b535bc`、既存`feat/ubuntu-phase2a`/worktreeを継続。mainはls-remoteで`b489fca1561bf12ff6b43205378220163d71c21c`のまま。最優先で`1d5d85c2a`へAGENTS.md/PLANS.md/計画/A5設計/CI方針の凍結を記録した。現在の受入条件は各冒頭の「Phase 2A受入範囲の凍結」で、過去の実frontend/server未実行・永久kernel I/O完全回収を理由とする2A未達記述を上書きする。これらを実行済み/解決済みとは扱わない。
+
+具体的な障害リスクを質問し、ユーザーは次の4点を明示許容した。
+
+1. 16件満杯時は受理済み分を順序どおり保留し、新規分を受理前拒否して通常入力へ戻す。新しい通常入力が手動救済前に先に表示され得る。受理済み分の再送/破棄許可ではない。
+2. 保存先障害時は稼働中の保持・失敗通知・手動確認/保存までを2A必須とする。終了後まで必ず残す保証は将来課題で、未保存メモリはプロセス終了で失われ得る。
+3. 停止後keyは自己作成時の所有記録付きだけ再利用する。記録のない旧keyは自動移行/削除せず保持・拒否する。
+4. 変換sessionは入力欄ごとに独立させ、アプリ/全体共有設定によるsession/取消共有を行わない。モード設定の共有方針は維持する。
+
+### 実装と再利用した限定試験
+
+- **有界受付/回復**：Submitのtrueは受理済み・消費、falseは受理前拒否と明記。16件満杯時は最初の停止理由、pending/preedit/delivering/outcomeを保持し、以後自動配送しない。UIは保留と新規キーの無変換通過を通知し、journalを消さず旧preedit/candidate表示を隠す。明示「Retry conversion for new input」は旧recordをprocess registryへ残してfresh pipeline/sessionを作り、旧入力を再生しない。保持枠32件を超えれば新規受付を拒否して通常入力を維持する。
+- **非同期frontend/session**：poolはIC UUID単位のsessionを作り、取消済みclientを再利用しない。旧clientのdeleterは新登録を消さない。初期化callbackにpipeline専用generationを追加し、通常keypressで増えるepochとは分離。GET_CONFIGの受付拒否も明示失敗へ進め、callback待ちに固定しない。既存pipeline試験の満杯確認を拡張し、送信中満杯/配送hook再入の2件、既存frontend境界に全3policyでの二IC独立・取消・fresh retry・旧deleterの1件を追加した。
+- **手動救済**：既存Show/Save/Readを維持し、最大16KiB UTF-8ページと明示Next操作で保留record全体を確認できる。group/停止理由、preedit、pending/compose、押下/解放、結果不明配送/既適用かもしれない結果を区別する。元IC/focus/現在IME/sensitive/epochを照合し、入力/IPCの再送・自動commitは行わない。ページ終端/UTF-8と不確かなoutcome保持の2件を追加。保存失敗のメモリ保持と通知は既存実装/試験を再利用する。
+- **停止後key**：子のfresh O_EXCL予約直後だけ`.session.ipc.owner`をO_EXCL/0600で作成し、profile/key device・inode、keyのstatx birthtimeへ結合する。親事前検査と子の継承launch lease下でNOFOLLOW/UID/単一link/0600/所有記録一致とkey OFD非破壊取得を確認。入口でkeyをunlink/truncateせず、実更新は既存ProcessMutexのOFD取得後のみ。正常停止後の新scope再起動で同inode/markerを保持する試験と、不正marker時のkey/marker不変拒否の2件を追加。既存peer非adopt・管理保存のcold-start禁止・同scope cleanupの暗黙再起動禁止は維持。birthtime非対応filesystem/markerなし旧資産はfail-closedで2B環境確認事項とする。
+- **通常終了**：既存archive子の終了回収が再び即falseとなったため、root mutexを一回try_lockして失敗する経路を、既存の固定390ms期限内で最大1ms刻みのtry_lock再試行へ変更した。後続native joinも同じ残予算を使い、focus/IME切替/通常Cancelには待機を追加しない。即時失敗の原因を直接計測で断定したものではない。既存archive/worker/child試験を再利用し、3500msは予算内未回収という判定を維持する。
+
+### 最終検証と成果物
+
+`P2/run_scope_completion_final_20261117.py`で製品stage_inputsと18ターゲット198成功・fixture入口2 skip。20.562秒、RX上限564,757 bytes、workspace peak 7,489,347,584 bytes。変更依存9ターゲットを実行し、9ターゲットは対応cacheを再利用。手前のowner限定14件成功と、統合v2の18ターゲット成功も別ログへ保持した。初回owner試験はsandboxが合成abstract bindをEPERMで拒否して失敗し、fixture exit14/Python合成bindで環境原因を確認した。以後、承認済み合成fixtureだけを許可環境で実行し、製品IME/server/toolは起動していない。
+
+既存`run_owned_child_probe.py`は24シナリオ成功（`resume-scope-owned-child-probe-v2-20261117.log`、11.288秒）。最初はsystem compilerの-Werrorがtry_lock戻り値未使用を検出し、その修正後に再実行した。通常終了150ms gracefulとcreator順序の正負例、3500ms未回収を保持し、永久停止からの完全回収証明へ広げない。旧OFF62/旧52ケースの証拠は保持し、今回のOFF再実行とは扱わない。新規依存取得なし、既存Bazel9.0.2/cache、隔離HOME/XDG、jobs=2/60GiB/新規取得2GiB制限を維持する。buildifier/Python構文/diff検査成功。actionlint/clang-formatは未導入・未実行。
+
+設計担当の最終コード監査で、凍結した2A必須範囲の新たな具体的安全違反は見つからなかった。旧callback排除、寿命guard、session独立、pool deleter、key所有とOFD排他、workerへのfilesystem分離を確認した。限定試験成功を受け、factoryを正規MozcEngine生成へ接続した。`Enabled=False`は維持し、ロード/導入は実施しない。stagingは`PHASE2B_CANDIDATE_PENDING_FULL_CI`とし、factory常時拒否という旧ラベルを使わない。最終commit後の新規ディレクトリへmanifest/hash・NODELETE・限定export・辞書dataset不変を記録する。
+
+### A1〜A7の凍結範囲による判定
+
+| 条件 | 判定 | 証拠・限界 |
+|---|---|---|
+| A1 基点・来歴 | 達成 | main/branch基点、既存由来manifest/ライセンス/辞書入力を維持 |
+| A2 独立性 | 達成（2A） | 専用ID/profile/IPC/export、既存peer非adopt、所有key限定再利用と負試験。実Hazkey同時ロードは2B |
+| A3 ビルド・staging | 達成（2A候補） | 専用.so/server/tool build、既定無効・factory接続。実ロード/配置後動作は2B |
+| A4 callback/寿命 | 達成（2A） | 限定fixtureの取消/世代/一回適用/再入/IC独立/保留を確認。実frontendは2B |
+| A5 応答性・入力安全 | 達成（凍結2A範囲） | 有界受付前拒否と受理済み保留、明示fresh retry/手動確認、通常終了の残予算。実表示測定は2B、保存不能終了後保全と永久kernel回収の網羅保証は将来課題 |
+| A6 回帰・CI | 部分達成 | ON198、旧OFF62を保持。最終対象SHAの全6系統は未実行 |
+| A7 資産/ホスト保護 | 達成 | 元staged差分/76資産hash/cache保持、資源制限内、ホストIME/システム変更なし |
+
+**真の残ブロッカーは最終対象SHAの全6系統CI成功確認。2A全体はその証拠が揃うまで完了とせず、現時点で2B移行不可。** 利用可能GitHub toolにworkflow_dispatchがなく、ghも未導入のため、認証回避/新規ツール導入はしない。手動操作はGitHub Actionsの[Secure Offline Checks](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/workflows/secure-offline.yaml)→Run workflow→`feat/ubuntu-phase2a`を選択。最終push SHAとrun/job head_sha一致、およびLinux/Windows/macOS/Android/Lint/Zenzの6系統成功を確認する。通常pushの3系統成功は代替証拠ではない。
+
+2Bへは実Fcitx5ロード・Wayland/X11・実打鍵/表示遅延・実frontend/server・Hazkeyとの隔離同時ロード・T00配置移動後動作を移管する。CIが揃っても2B実行には別途承認が必要。将来課題は保存先障害時の終了後完全保全、永久kernel I/Oの完全回収、同一UID敵対操作の網羅証明。既知UAF/通常の無期限待機/具体的重大脆弱性を将来課題へ移すことは認めない。新たな仮想故障条件を合格条件へ追加しない。

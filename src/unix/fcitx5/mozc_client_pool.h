@@ -58,7 +58,7 @@ class MozcClientPool : public TrackableObject<MozcClientPool> {
  private:
   std::shared_ptr<MozcClientInterface> registerClient(
       const std::string& key, std::unique_ptr<MozcClientInterface> client);
-  void unregisterClient(const std::string& key);
+  void unregisterClient(const std::string& key, const MozcClientInterface* client);
   PropertyPropagatePolicy policy_;
   EventLoop& loop_;
   std::shared_ptr<mozc::fcitx5::SessionCloseQueue> cleanup_;
