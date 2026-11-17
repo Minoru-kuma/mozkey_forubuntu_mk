@@ -18,6 +18,9 @@ struct InputFrame {
   uint32_t time = 0;
   std::optional<commands::Input> request;
   bool physical = true, translated = false, japanese_layout = false;
+  // Runtime-only tag for the automatic, unsent initial mode command. Archives
+  // do not restore this permission; recovered records are inspection-only.
+  bool initial_mode = false;
   uint64_t generation = 0;
   bool surrounding_valid = false;
   std::string selection_snapshot;
@@ -50,6 +53,10 @@ class InputPipeline {
   ~InputPipeline();
   bool Submit(InputFrame frame); // true means original KeyEvent must be consumed.
   void SetReady(bool ready);
+  // Initialization failure only: no preedit/outcome/compose or possibly sent
+  // request. Drain known raw keys through the normal serialized delivery hook.
+  // Rejection leaves the journal untouched; this is NOT a full-queue recovery.
+  bool BeginUnsentFallback();
   void SetTranslator(std::function<void(InputFrame&)> translate) { translate_ = std::move(translate); }
   void Hold(std::string reason);
   bool suspended() const { return record_->suspended; }
@@ -67,6 +74,7 @@ class InputPipeline {
   std::function<void(InputFrame&)> translate_;
   std::unique_ptr<fcitx::EventSource> defer_;
   bool active_ = false, ready_ = true;
+  bool raw_fallback_ = false;
   uint64_t token_ = 0;
   // Per activation: a release balances any raw down already sent to the app.
   // A missing entry may have started before activation, so it is forwarded.

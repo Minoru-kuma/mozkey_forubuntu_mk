@@ -264,5 +264,18 @@ TEST_F(RecoveryFileTest, IndexFailureIsNotReportedAsDurableShutdownSuccess) {
   EXPECT_EQ(text, "sentinel");
 }
 
+TEST(InputRecoveryTest, ArchiveCannotRestorePermissionToDiscardInitialModePrelude) {
+  auto record = std::make_shared<RetainedInput>();
+  InputFrame frame; frame.physical = false; frame.translated = true; frame.initial_mode = true;
+  frame.request.emplace(); frame.request->set_type(commands::Input::SEND_COMMAND);
+  frame.request->mutable_command()->set_type(commands::SessionCommand::SWITCH_COMPOSITION_MODE);
+  frame.request->mutable_command()->set_composition_mode(commands::HIRAGANA);
+  record->pending.push_back(frame);
+  std::string bytes; ASSERT_TRUE(InputRecovery::Encode({record}, &bytes));
+  InputRecovery::Records restored; ASSERT_TRUE(InputRecovery::Decode(bytes, &restored));
+  ASSERT_EQ(restored.size(), 1); ASSERT_EQ(restored[0]->pending.size(), 1);
+  EXPECT_TRUE(restored[0]->suspended); EXPECT_FALSE(restored[0]->pending[0].initial_mode);
+  EXPECT_EQ(restored[0]->pending[0].request->SerializeAsString(), frame.request->SerializeAsString());
+}
 }  // namespace
 }  // namespace mozc::fcitx5

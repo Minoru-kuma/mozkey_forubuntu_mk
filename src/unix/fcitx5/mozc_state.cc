@@ -118,7 +118,7 @@ bool MozcState::EnsurePipeline() {
           ic->commitString(forward->composed_text); return valid();
         }
         if (forward) ic->forwardKey(forward->raw, forward->release, forward->time);
-        return watch.isValid();
+        return valid();
       });
   pipeline_->SetReady(false);
   pipeline_->SetTranslator([this](auto& frame) { TranslateFrame(frame); });
@@ -154,7 +154,14 @@ void MozcState::UpdatePreeditMethod() {
   const auto weak = std::weak_ptr<int>(lifetime_);
   GetClient()->Submit(std::move(input), [this, watch, weak](bool ok, auto output) {
     if (weak.expired() || !watch.isValid()) return;
-    if (!ok || !output.has_config()) { pipeline_->Hold("configuration-failed"); return; }
+    if (!ok || !output.has_config()) {
+      const bool fallback = pipeline_->BeginUnsentFallback();
+      if (weak.expired() || !watch.isValid()) return;
+      if (!fallback) pipeline_->Hold("configuration-failed");
+      if (weak.expired() || !watch.isValid()) return;
+      ShowRetained();
+      return;
+    }
     preedit_method_ = output.config().preedit_method();
     pipeline_->SetReady(true);
   });
@@ -183,9 +190,10 @@ bool MozcState::ProcessKeyEvent(KeySym sym, uint32_t code, KeyStates states,
   if (!consumed) ShowRetained();
   return consumed;
 }
-bool MozcState::SubmitCommand(mozc::commands::SessionCommand command) {
+bool MozcState::SubmitCommand(mozc::commands::SessionCommand command, bool initial_mode) {
   if (!EnsurePipeline() || pipeline_->suspended()) return false;
   mozc::fcitx5::InputFrame frame; frame.physical = false; frame.translated = true;
+  frame.initial_mode = initial_mode;
   frame.generation = epoch_;
   const auto& surrounding = ic_->surroundingText();
   if (ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) &&
@@ -244,7 +252,7 @@ void MozcState::FocusIn() {
   if (pipeline_ && pipeline_->suspended()) { ShowRetained(); return; }
   if (!EnsurePipeline()) return;
   UpdatePreeditMethod();
-  SendCompositionMode(composition_mode_);
+  SendCompositionMode(composition_mode_, true);
   DrawAll();
 }
 void MozcState::FocusOut(const InputContextEvent&) {
@@ -270,6 +278,10 @@ void MozcState::ShowRetained(bool inspect) {
   // Automatic focus/key notices never expose input from other contexts.
   // Only the explicit inspection action may show the process-owned journal.
   std::string text = _("Input retained; automatic delivery is suspended");
+  if (retained_ && retained_->reason == "initialization-raw-fallback" &&
+      !retained_->delivering && !retained_->outcome) {
+    text = _("Conversion unavailable; unsent keys continue without conversion. Switch input method off and on to retry");
+  }
   if (inspect) text += mozc::fcitx5::InputRecovery::Inspect(mozc::fcitx5::InputRetention::Snapshot());
   ic_->inputPanel().setAuxUp(Text(text));
   ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
@@ -339,12 +351,12 @@ void MozcState::SetCompositionMode(mozc::commands::CompositionMode mode,
   }
 }
 
-void MozcState::SendCompositionMode(mozc::commands::CompositionMode mode) {
+void MozcState::SendCompositionMode(mozc::commands::CompositionMode mode, bool initial) {
   CancelCallbacks();
   mozc::commands::SessionCommand command;
   command.set_type(mode == mozc::commands::DIRECT ? mozc::commands::SessionCommand::TURN_OFF_IME :
                                                    mozc::commands::SessionCommand::SWITCH_COMPOSITION_MODE);
-  command.set_composition_mode(mode); SubmitCommand(std::move(command));
+  command.set_composition_mode(mode); SubmitCommand(std::move(command), initial);
 }
 
 void MozcState::SetUrl(const std::string& url) { url_ = url; }

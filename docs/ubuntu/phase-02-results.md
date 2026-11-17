@@ -1048,3 +1048,20 @@ FD属性検査ではfcntl自体の成功も明示確認し、最終`run_server_o
 - ON staging構成復元：13.832秒、全18ターゲットは対応入力cacheを再利用。ON/OFF集計を別JSONに保存し混同しない。jobs=2・取得禁止・隔離HOME/XDG・既存cache・60GiB/取得2GiB制限を維持。
 
 検査時点のhardlink拒否を確認したもので、同UIDの能動的なmetadata差替えや全TOCTOU解消は未証明。コピーされた同一keyのprovenance、停止後の所有keyの安全な再利用、満杯時の入力順序/救済、永久I/O/runtime、実frontend/実serverと全6系統CIは引き続き未達・未検証。利用可能toolにworkflow dispatchはなく、gh導入/認証回避は行わない。factory常時拒否・Enabled=False、2A未完了・2B移行不可を維持して独立作業を継続する。
+
+
+## 2026-11-17追加方針：既知の未送信入力だけを英数へ復帰
+
+ユーザーは「まだserverへ送信しておらず未確定表示もないキーに限り、元の入力欄へ順送りして一時的に英数入力へ戻す」方針を明示的に許容した。送信済み/適用結果不明の入力は対象外とする。
+
+`InputPipeline::BeginUnsentFallback`を追加し、初期化が失敗した場合に限り、準備未完了・preedit/compose/outcome/delivering無し・未翻訳の物理raw frameだけを対象にする。翻訳/RPCを再開せず、既存Defer一件ずつのdelivery hookで元IC/focus/現在IMEと有効性を再検査して送る。新規入力の順序も同じqueueで保ち、配送後に旧config成功が届いても再開しない。focus変更/配送中断/owner破棄では残りと配送中frameを保持し、自動再生しない。通常のraw転送後もDeliveryValidを照合する。
+
+FocusInが自動投入するmode設定が先頭にあるため、単なるphysical-only判定では製品から復帰を開始できなかった。自動初期modeだけにruntimeタグを付け、64bytes以下の既知commandと厳密一致する場合だけ未送信の設定を除外する。ユーザー操作のmode/candidate/reconversion要求は除外せず、復帰条件不成立として保持する。archiveからこの破棄権限は復元しない。利用者には変換不可・未送信キーの無変換転送・切替による再試行を表示する。
+
+7つのpipeline試験で、raw押下/keyupの一回転送・翻訳/RPC無し・late ready無効、既存preedit/compose/応答/送信可能要求等の拒否、準備済みpipelineの拒否、focus変更時の保持、再入arrivalの順序、途中配送の保持、自動modeタグとユーザー操作の分離を確認した。さらにarchiveでタグ権限が戻らず元commandが保持される1件を追加した。再入注入は公開SDKの制御scheduler、通常の順送りは実EventLoopを使う隔離fixtureであり、実IMEではない。
+
+`P2/run_unsent_fallback_final_20261117.py`で製品stage_inputsと18ターゲット187成功・fixture入口2 skip（29.223秒、RX上限5,245,010 bytes、peak 7,318,134,784 bytes）。mode前置設定/表示通知の修正前の成功もそれぞれlogを保持し、最終版と区別する。OFF62の前段成功は保持、今回はLinux専用frontendのためOFF再実行と混同しない。jobs=2・取得禁止・既存cache・76資産/元差分を維持する。
+
+直前e63470a80のLint `44003751932`、Linux limited `44003751899`、Zenz `44003752038`は成功し、リモートHEAD一致も確認した。今回のSHAへ旧CI成功を流用しない。
+
+**この変更はqueue満杯時の回復ではない。** 既存16件上限で既にsuspendした入力、結果不明の要求、表示済みpreedit、無制限な入力流入・再入、永久I/O、停止後keyの安全な再利用は依然未解決。未送信復帰の許容を、未知の要求のreplayや合格条件緩和へ広げない。実frontend/実server・全6系統CIも未検証。factory常時拒否とEnabled=False、2A未完了・2B移行不可を維持する。

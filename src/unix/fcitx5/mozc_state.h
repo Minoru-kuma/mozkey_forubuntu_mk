@@ -90,7 +90,7 @@ class MozcState : public InputContextProperty {
   void SetCompositionMode(mozc::commands::CompositionMode mode,
                           bool updateUI = true);
 
-  void SendCompositionMode(mozc::commands::CompositionMode mode);
+  void SendCompositionMode(mozc::commands::CompositionMode mode, bool initial = false);
 
   // Sets the url to be opened by the default browser.
   void SetUrl(const std::string& url);
@@ -116,7 +116,7 @@ class MozcState : public InputContextProperty {
   void DisplayUsage();
   bool EnsurePipeline();
   void TranslateFrame(mozc::fcitx5::InputFrame& frame);
-  bool SubmitCommand(mozc::commands::SessionCommand command);
+  bool SubmitCommand(mozc::commands::SessionCommand command, bool initial_mode = false);
   // Parses the response from mozc_server. Returns whether the server consumes
   // the input or not (true means 'consumed').
   bool ParseResponse(const mozc::commands::Output& raw_response);

@@ -14,6 +14,23 @@ auto& Records() {
 uint64_t PhysicalKey(const InputFrame& frame) {
   return frame.raw.code() ? (uint64_t(frame.raw.code()) << 1) | 1 : uint64_t(frame.raw.sym()) << 1;
 }
+bool UnsentRaw(const InputFrame& frame) {
+  return frame.physical && !frame.initial_mode && !frame.translated && !frame.request &&
+      frame.compose == InputFrame::Compose::None && frame.composed_text.empty();
+}
+bool UnsentInitialMode(const InputFrame& frame) {
+  if (!frame.initial_mode || frame.physical || !frame.translated || !frame.request ||
+      frame.request->ByteSizeLong() > 64 || !frame.composed_text.empty() ||
+      frame.compose != InputFrame::Compose::None || frame.selected_length) return false;
+  const auto& command = frame.request->command();
+  if (!command.has_composition_mode() || command.composition_mode() < commands::DIRECT ||
+      command.composition_mode() >= commands::NUM_OF_COMPOSITIONS) return false;
+  commands::Input expected; expected.set_type(commands::Input::SEND_COMMAND);
+  expected.mutable_command()->set_type(command.composition_mode() == commands::DIRECT ?
+      commands::SessionCommand::TURN_OFF_IME : commands::SessionCommand::SWITCH_COMPOSITION_MODE);
+  expected.mutable_command()->set_composition_mode(command.composition_mode());
+  return frame.request->SerializeAsString() == expected.SerializeAsString();
+}
 }
 std::shared_ptr<RetainedInput> InputRetention::Reserve() {
   if (Records().size() >= 32) return {};
@@ -48,6 +65,7 @@ void InputPipeline::Hold(std::string reason) {
 }
 bool InputPipeline::Submit(InputFrame frame) {
   if (record_->suspended) return false;
+  if (raw_fallback_ && !UnsentRaw(frame)) { Hold("invalid-raw-fallback-input"); return false; }
   if ((frame.request && frame.request->ByteSizeLong() > 1024 * 1024) ||
       frame.selection_snapshot.size() > 65536) { Hold("input-too-large"); return false; }
   if (record_->pending.size() >= 16) { Hold("input-queue-full"); return false; }
@@ -60,10 +78,29 @@ void InputPipeline::Schedule() {
   defer_->setOneShot();
 }
 void InputPipeline::SetReady(bool ready) {
+  if (raw_fallback_) return; // A late initialization callback cannot resume RPC.
   ready_ = ready;
   if (ready && !active_ && !record_->pending.empty() && !record_->suspended) {
     active_ = true; Schedule();
   }
+}
+bool InputPipeline::BeginUnsentFallback() {
+  if (raw_fallback_ || ready_ || record_->suspended || !record_->preedit.empty() ||
+      !record_->composing.empty() || record_->delivering || record_->outcome ||
+      !std::all_of(record_->pending.begin(), record_->pending.end(), [](const auto& frame) {
+        return UnsentRaw(frame) || UnsentInitialMode(frame);
+      })) return false;
+  const auto weak = std::weak_ptr<int>(lifetime_);
+  auto valid = valid_;
+  if (!valid() || weak.expired()) return false;
+  ++token_; defer_.reset();
+  raw_fallback_ = true; ready_ = true; active_ = true;
+  std::erase_if(record_->pending, UnsentInitialMode); // No text and never sent.
+  record_->reason = "initialization-raw-fallback";
+  auto cancel = cancel_; cancel();
+  if (weak.expired()) return true;
+  if (record_->suspended) return false;
+  Schedule(); return true;
 }
 bool InputPipeline::ForwardRelease(const InputFrame& frame) const {
   const auto down = forwarded_down_.find(PhysicalKey(frame));
@@ -77,7 +114,11 @@ void InputPipeline::RecordPhysicalDelivery(const InputFrame& frame, bool raw_for
 }
 void InputPipeline::Next() {
   if (!ready_) { active_ = false; return; }
-  if (record_->suspended || record_->pending.empty()) { active_ = false; return; }
+  if (record_->suspended || record_->pending.empty()) {
+    active_ = false;
+    if (raw_fallback_ && record_->pending.empty()) record_->suspended = true;
+    return;
+  }
   auto weak = std::weak_ptr<int>(lifetime_);
   auto valid = valid_;
   const bool eligible = valid();
@@ -86,7 +127,7 @@ void InputPipeline::Next() {
   const auto& physical = record_->pending.front();
   if (physical.physical && !physical.release && forwarded_down_.size() >= 256 &&
       !forwarded_down_.contains(PhysicalKey(physical))) { Hold("physical-key-ledger-full"); return; }
-  if (!record_->pending.front().translated && translate_) {
+  if (!raw_fallback_ && !record_->pending.front().translated && translate_) {
     auto translate = translate_;
     auto translated = record_->pending.front();
     translate(translated);

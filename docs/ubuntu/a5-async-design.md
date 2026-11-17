@@ -263,3 +263,10 @@ native supervisorは制御eventfd（process寿命で1個）、子pidfdとnonbloc
 ### hardlink keyの読取り拒否（2026-11-17）
 
 deadline readerでもkey fileのlink数1を要求する。private directory/UID/modeだけでは、別private profileの同じkey inodeから実行path/PID/版の正しい別profileへ接続できるためである。実fixtureでこの誤接続を再現した後、接続/FD移譲/送信の拒否とkey/peer不変を確認した。新しいfilesystem処理をloopへ入れず、検証はworker上のまま。検査後の能動的差替え/全TOCTOUの解決やA5全体の合格を意味しない。
+
+
+### 許容された未送信分だけの無変換復帰（2026-11-17）
+
+初期化失敗時、まだserverへ送信しておらず表示済みpreeditもない物理rawキーを、元ICのfocus/IME/有効性を確認してDeferで一件ずつ転送する。ユーザーがこの限定範囲の英数復帰を許容した。翻訳/RPC、結果不明入力の再生、表示済み文字の自動確定は行わない。途中のfocus/配送中断は保留へ戻し、自動再開しない。自動初期mode設定だけはruntimeタグと厳密command照合により除外し、archiveへ権限を持ち越さない。
+
+これは16件満杯の問題を解決せず、満杯で既にsuspendしたqueueを復帰対象にしない。再入/無制限流入のbackpressure、停止後key、保存不能/永久I/Oと実frontendの証拠は別途必要。元の「結果不明入力を自動再生しない」条件とfactory拒否を維持する。

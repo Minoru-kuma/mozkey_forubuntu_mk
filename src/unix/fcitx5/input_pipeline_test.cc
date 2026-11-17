@@ -450,5 +450,91 @@ TEST(InputPipelineCoreTest, FocusChangeDoesNotCommitOrForwardIntoEitherContext) 
   EXPECT_TRUE(old.forwarded.empty()); EXPECT_TRUE(other.forwarded.empty());
   ASSERT_TRUE(f.record->outcome); EXPECT_EQ(f.record->outcome->result().value(), "亜");
 }
+InputFrame RawFrame(char key, bool release = false) {
+  auto frame = Frame(key, release); frame.request.reset(); return frame;
+}
+TEST(InputPipelineTest, InitializationFailureForwardsOnlyUnsentRawKeysOnce) {
+  Fixture f; f.pipeline->SetReady(false);
+  int translated = 0;
+  f.pipeline->SetTranslator([&](auto&) { ++translated; });
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('a')));
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('a', true)));
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('b')));
+  ASSERT_TRUE(f.pipeline->BeginUnsentFallback());
+  EXPECT_FALSE(f.pipeline->BeginUnsentFallback());
+  f.pipeline->SetReady(true); // Late config success cannot re-enable translation.
+  RunLoop(f.loop);
+  EXPECT_EQ(f.sent, 0); EXPECT_EQ(translated, 0); EXPECT_EQ(f.applied, 0);
+  EXPECT_EQ(f.keys, (std::vector<unsigned>{'a', 'a', 'b'}));
+  EXPECT_TRUE(f.record->pending.empty()); EXPECT_TRUE(f.pipeline->suspended());
+  EXPECT_FALSE(f.pipeline->Submit(RawFrame('c')));
+  EXPECT_EQ(f.keys.size(), 3); EXPECT_EQ(f.cancelled, 1);
+}
+TEST(InputPipelineTest, FallbackRejectsPreeditComposeOutcomeOrPossiblySentRequests) {
+  for (int kind = 0; kind < 6; ++kind) {
+    Fixture f; f.pipeline->SetReady(false); auto frame = RawFrame('a');
+    if (kind == 0) f.record->preedit = "未確定";
+    if (kind == 1) f.record->composing.push_back(RawFrame('x'));
+    if (kind == 2) f.record->outcome.emplace();
+    if (kind == 3) frame = Frame('a');
+    if (kind == 4) frame.translated = true;
+    if (kind == 5) frame.physical = false;
+    ASSERT_TRUE(f.pipeline->Submit(std::move(frame)));
+    EXPECT_FALSE(f.pipeline->BeginUnsentFallback());
+    EXPECT_EQ(f.forwarded, 0); EXPECT_EQ(f.cancelled, 0);
+    EXPECT_EQ(f.record->pending.size(), 1);
+  }
+}
+TEST(InputPipelineTest, FallbackCannotActivateOnAnInitializedPipeline) {
+  Fixture f; ASSERT_TRUE(f.pipeline->Submit(RawFrame('a')));
+  EXPECT_FALSE(f.pipeline->BeginUnsentFallback()); EXPECT_EQ(f.cancelled, 0);
+}
+TEST(InputPipelineTest, FallbackFocusChangeRetainsKeysInsteadOfSendingToNewContext) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend)); f.pipeline->SetReady(false);
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('a')));
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('b')));
+  ASSERT_TRUE(f.pipeline->BeginUnsentFallback()); f.focused = false;
+  ASSERT_TRUE(scheduler->Step()); f.focused = true;
+  EXPECT_EQ(f.forwarded, 0); EXPECT_EQ(f.record->pending.size(), 2);
+  EXPECT_FALSE(f.pipeline->BeginUnsentFallback()); EXPECT_FALSE(scheduler->Step());
+}
+TEST(InputPipelineTest, FallbackSerializesNestedArrivalWithoutStartingRpc) {
+  auto backend = std::make_unique<ReentrantDeferLoop>(); auto* scheduler = backend.get();
+  Fixture f(std::move(backend)); f.pipeline->SetReady(false);
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('a'))); ASSERT_TRUE(f.pipeline->Submit(RawFrame('b')));
+  ASSERT_TRUE(f.pipeline->BeginUnsentFallback());
+  f.during_delivery = [&] {
+    EXPECT_FALSE(scheduler->Step());
+    ASSERT_TRUE(f.pipeline->Submit(RawFrame('c')));
+  };
+  ASSERT_TRUE(scheduler->Step()); f.during_delivery = {};
+  ASSERT_TRUE(scheduler->Step()); ASSERT_TRUE(scheduler->Step()); ASSERT_TRUE(scheduler->Step());
+  EXPECT_EQ(f.keys, (std::vector<unsigned>{'a', 'b', 'c'})); EXPECT_EQ(f.sent, 0);
+}
+TEST(InputPipelineTest, FallbackInterruptedDeliveryKeepsUncertainFrameAndRemainingInput) {
+  Fixture f; f.pipeline->SetReady(false);
+  ASSERT_TRUE(f.pipeline->Submit(RawFrame('a'))); ASSERT_TRUE(f.pipeline->Submit(RawFrame('b')));
+  ASSERT_TRUE(f.pipeline->BeginUnsentFallback());
+  f.during_delivery = [&] { f.pipeline->Hold("focus-changed-inside-forward"); f.focused = false; };
+  RunLoop(f.loop);
+  EXPECT_EQ(f.keys, (std::vector<unsigned>{'a'})); ASSERT_TRUE(f.record->delivering);
+  EXPECT_EQ(f.record->delivering->raw.sym(), 'a'); ASSERT_TRUE(f.record->outcome);
+  ASSERT_EQ(f.record->pending.size(), 1); EXPECT_EQ(f.record->pending.front().raw.sym(), 'b');
+  f.focused = true; EXPECT_FALSE(f.pipeline->BeginUnsentFallback());
+}
+TEST(InputPipelineTest, FallbackMayDiscardOnlyTheTaggedAutomaticModePrelude) {
+  for (bool tagged : {false, true}) {
+    Fixture f; f.pipeline->SetReady(false);
+    InputFrame mode; mode.physical = false; mode.translated = true; mode.initial_mode = tagged;
+    mode.request.emplace(); mode.request->set_type(commands::Input::SEND_COMMAND);
+    mode.request->mutable_command()->set_type(commands::SessionCommand::SWITCH_COMPOSITION_MODE);
+    mode.request->mutable_command()->set_composition_mode(commands::HIRAGANA);
+    ASSERT_TRUE(f.pipeline->Submit(std::move(mode))); ASSERT_TRUE(f.pipeline->Submit(RawFrame('a')));
+    EXPECT_EQ(f.pipeline->BeginUnsentFallback(), tagged);
+    if (tagged) { RunLoop(f.loop); EXPECT_EQ(f.keys, (std::vector<unsigned>{'a'})); EXPECT_EQ(f.sent, 0); }
+    else { EXPECT_EQ(f.record->pending.size(), 2); EXPECT_EQ(f.forwarded, 0); }
+  }
+}
 }  // namespace
 }  // namespace mozc::fcitx5
