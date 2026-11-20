@@ -81,6 +81,15 @@ jobs:
           submodules: false
           persist-credentials: false
 
+      - name: Prepare daily dictionary
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\tools\dictionary\prepare_daily_dictionary.ps1
+
       - name: Restore update_deps cache
         uses: actions/cache@v5
         with:

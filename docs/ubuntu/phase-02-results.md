@@ -1126,3 +1126,9 @@ FocusInが自動投入するmode設定が先頭にあるため、単なるphysic
 **真の残ブロッカーは最終対象SHAの全6系統CI成功確認。2A全体はその証拠が揃うまで完了とせず、現時点で2B移行不可。** 利用可能GitHub toolにworkflow_dispatchがなく、ghも未導入のため、認証回避/新規ツール導入はしない。手動操作はGitHub Actionsの[Secure Offline Checks](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/workflows/secure-offline.yaml)→Run workflow→`feat/ubuntu-phase2a`を選択。最終push SHAとrun/job head_sha一致、およびLinux/Windows/macOS/Android/Lint/Zenzの6系統成功を確認する。通常pushの3系統成功は代替証拠ではない。
 
 2Bへは実Fcitx5ロード・Wayland/X11・実打鍵/表示遅延・実frontend/server・Hazkeyとの隔離同時ロード・T00配置移動後動作を移管する。CIが揃っても2B実行には別途承認が必要。将来課題は保存先障害時の終了後完全保全、永久kernel I/Oの完全回収、同一UID敵対操作の網羅証明。既知UAF/通常の無期限待機/具体的重大脆弱性を将来課題へ移すことは認めない。新たな仮想故障条件を合格条件へ追加しない。
+
+## 2026-11-20 Windows CIの修正
+
+旧対象 `aef66a6d2` の[フルCI](https://github.com/Minoru-kuma/mozkey_forubuntu_mk/actions/runs/44244443575)は再実行でも失敗した。Linux・macOS・Android・Lint・ZenzとWindows x64は成功。Windows ARM64のビルドとテストは、MSVC 14.52のSTLがClang 22以上を要求するためコンパイルで停止した。Binary no-network checkは生成辞書4点の不足でパッケージビルドが止まり、バイナリ検査は未実行だった。
+
+Windows ARM64用LLVMの固定版を22.1.8に更新し、配布元のサイズとSHA-256を照合した。[公式配布ファイル](https://github.com/llvm/llvm-project/releases/expanded_assets/llvmorg-22.1.8)を使用する。Binary no-network checkには通常のWindows CIと同じdaily辞書準備手順をパッケージビルド前に追加した。変更箇所はARM64用アーカイブの定義と辞書準備の1 step。YAML・Python構文、既存の6 workflow呼出し、辞書準備手順の一致、差分を静的検査した。修正の成否は修正後SHAのフルCIで判定する。
